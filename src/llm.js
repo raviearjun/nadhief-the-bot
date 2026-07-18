@@ -225,17 +225,27 @@ export async function answerQuestion(history, facts = [], senderName = "", notes
       "jadwalin/lihat/ubah/hapus event kalender -> create_calendar_event/list_calendar_events/update_calendar_event/delete_calendar_event " +
       "(waktu HARUS ISO 8601 dengan offset timezone, hitung dari 'Hari ini' di atas; " +
       "kalau user tidak menyebut jam untuk event baru, TANYA dulu jamnya — jangan asal pilih jam sendiri); " +
-      "bikin dokumen/file yang bisa dibuka di browser atau dibagikan -> create_google_doc; " +
+      "bikin dokumen/tulisan yang bisa dibuka di browser atau dibagikan -> create_google_doc; " +
+      "bikin SPREADSHEET BARU (tabel, daftar, rekap) -> create_google_sheet, BUKAN create_google_doc " +
+      "(create_google_doc bikin dokumen teks biasa, bukan spreadsheet beneran walau isinya kamu tulis " +
+      "sebagai tabel markdown — kalau user bilang 'spreadsheet', WAJIB create_google_sheet); " +
       "cari file di Google Drive user -> search_drive_files, lalu baca isinya -> read_drive_file " +
       "('cek feedback dari X', 'cari di gdrive' = pakai tools ini, jangan bilang tidak bisa; " +
       "kalau user minta LINK file/event yang pernah dibahas, panggil lagi tool-nya untuk ambil link asli — " +
       "jangan mengarang URL dan jangan bilang tidak punya); " +
+      "ATURAN KERAS soal link Google Docs/Sheets/Drive: JANGAN PERNAH menulis URL docs.google.com, " +
+      "drive.google.com, atau spreadsheet apa pun kecuali itu persis hasil 'url'/'link'/'webViewLink' dari " +
+      "tool call yang BARU SAJA kamu panggil di giliran ini. Kalau user bilang link sebelumnya gagal/rusak/" +
+      "gak bisa dibuka, JANGAN kasih link baru dari ingatan/karangan — panggil ulang tool-nya (buat ulang " +
+      "atau cari lagi filenya) supaya link yang kamu kasih itu link asli yang baru dibuat. Mengarang link " +
+      "sama parahnya dengan mengarang fakta. " +
       "film yang lagi tayang di bioskop -> get_now_playing_movies; jam tayang film di suatu kota -> get_movie_showtimes " +
       "(booking/bayar TIDAK bisa — arahkan ke app m.tix/TIX ID, lalu tawarkan bikin event kalender + reminder setelah user beli); " +
       "cek/baca email -> search_emails + read_email; kirim email -> send_email TAPI WAJIB tunjukkan draft " +
       "(penerima, subjek, isi) dan tunggu konfirmasi user dulu sebelum memanggil tool-nya; " +
-      "baca spreadsheet -> read_sheet; catat data terstruktur (pengeluaran, log, dsb) ke spreadsheet -> append_sheet_row " +
-      "(baca dulu sheet-nya kalau belum yakin urutan kolomnya); " +
+      "baca spreadsheet -> read_sheet; catat data terstruktur (pengeluaran, log, dsb) ke spreadsheet yang SUDAH ADA " +
+      "-> append_sheet_row (baca dulu sheet-nya kalau belum yakin urutan kolomnya); spreadsheet BARU -> " +
+      "create_google_sheet (lihat aturan di atas); " +
       "cari video -> search_youtube; " +
       "GitHub: daftar repo -> list_github_repos, cek PR/issue/commit -> get_repo_activity (ada param branch), " +
       "daftar branch -> list_branches, bandingkan dua branch (commit & file berubah) -> compare_branches, " +

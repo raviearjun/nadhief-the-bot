@@ -68,10 +68,65 @@ async function appendRow(spreadsheetName, values, tab) {
   return { ok: true, spreadsheet: found.file.name, tab: target, appended: values, link: found.file.webViewLink };
 }
 
+async function createSheet(title, headers, rows) {
+  const sheets = google.sheets({ version: "v4", auth: auth() });
+
+  const res = await sheets.spreadsheets.create({
+    requestBody: { properties: { title }, sheets: [{ properties: { title: "Sheet1" } }] },
+    fields: "spreadsheetId, spreadsheetUrl",
+  });
+  const spreadsheetId = res.data.spreadsheetId;
+
+  const values = [...(headers?.length ? [headers] : []), ...(rows ?? [])];
+  if (values.length) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: "Sheet1!A1",
+      valueInputOption: "USER_ENTERED",
+      requestBody: { values: values.map((r) => r.map((v) => String(v))) },
+    });
+  }
+
+  // Same as docs.js: private to the creator by default, but this is a
+  // "share a link via WhatsApp" feature, so make it viewable by anyone with
+  // the link.
+  await google
+    .drive({ version: "v3", auth: auth() })
+    .permissions.create({ fileId: spreadsheetId, requestBody: { role: "reader", type: "anyone" } });
+
+  return { ok: true, url: res.data.spreadsheetUrl };
+}
+
 export function skills() {
   if (!isGoogleConnected()) return [];
 
   return [
+    {
+      definition: {
+        type: "function",
+        function: {
+          name: "create_google_sheet",
+          description:
+            "Create a brand NEW Google Sheets spreadsheet with an optional header row and initial data rows, " +
+            "and get a shareable link. Use for 'buatin spreadsheet baru ...', 'bikin tabel buat ...'. NOT for " +
+            "adding to a spreadsheet that already exists — use append_sheet_row for that instead.",
+          parameters: {
+            type: "object",
+            properties: {
+              title: { type: "string", description: "Spreadsheet title" },
+              headers: { type: "array", items: { type: "string" }, description: "Optional column header row" },
+              rows: {
+                type: "array",
+                items: { type: "array", items: { type: "string" } },
+                description: "Optional initial data rows, each an array of cell values in column order",
+              },
+            },
+            required: ["title"],
+          },
+        },
+      },
+      execute: ({ title, headers, rows }) => createSheet(title, headers, rows).catch(friendlyError),
+    },
     {
       definition: {
         type: "function",
