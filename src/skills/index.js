@@ -27,8 +27,10 @@ import * as sheets from "./sheets.js";
 import * as youtube from "./youtube.js";
 import * as github from "./github.js";
 import * as music from "./music.js";
+import * as server from "./server.js";
+import * as sticker from "./sticker.js";
 
-const MODULES = [search, calculator, weather, prayer, currency, reminders, todos, notes, summary, group, calendar, docs, drive, bioskop, whitelist, gmail, sheets, youtube, github, music];
+const MODULES = [search, calculator, weather, prayer, currency, reminders, todos, notes, summary, group, calendar, docs, drive, bioskop, whitelist, gmail, sheets, youtube, github, music, server, sticker];
 
 export function buildSkills(ctx) {
   return MODULES.flatMap((m) => m.skills(ctx));

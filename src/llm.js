@@ -332,7 +332,10 @@ export async function answerQuestion(history, facts = [], senderName = "", notes
       "daftar branch -> list_branches, bandingkan dua branch (commit & file berubah) -> compare_branches, " +
       "baca file/folder repo -> read_github_file (ada param ref untuk branch), " +
       "catat bug/task jadi issue -> create_github_issue (tunjukkan draft judul+isi dan tunggu konfirmasi user dulu). " +
-      "Kalau tool sudah mengirim sesuatu sendiri (tag_all_members, create_poll), cukup konfirmasi singkat. " +
+      "foto di pesan/reply jadi sticker WA -> make_sticker; " +
+      "Kalau ada tool get_server_status (hanya muncul untuk owner): dipakai saat owner tanya kondisi " +
+      "server/VPS (uptime, RAM, disk, status bot). " +
+      "Kalau tool sudah mengirim sesuatu sendiri (tag_all_members, create_poll, make_sticker), cukup konfirmasi singkat. " +
       "Kalau ada tool manage_whitelist (hanya muncul untuk owner): dipakai untuk menambah/menghapus/melihat " +
       "nomor yang boleh chat dengan kamu."
     : "\n\nKamu tidak punya akses internet real-time. Kalau ditanya sesuatu yang butuh info terkini " +

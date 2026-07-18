@@ -490,6 +490,7 @@ export function createMessageHandler({ waState }) {
       isGroup,
       isOwner: senderNumber === normalizeNumber(config.ownerNumber),
       relevantChatJids,
+      imageBuffer: null, // raw photo bytes, shared by vision + sticker skills
       get sock() {
         return live();
       },
@@ -498,24 +499,31 @@ export function createMessageHandler({ waState }) {
     const stopTyping = startTyping(live, chatJid);
 
     try {
-      // See the photo before answering: the vision model's description is
-      // written into this message's history row, so routeCommand's history
-      // fetch (and any later "foto yang tadi" question) picks it up. Vision
-      // failures degrade to answering from the caption alone.
-      if (imageInfo && config.llmVisionModel) {
+      // Download the photo once — the sticker skill needs the raw bytes even
+      // when vision is off, and vision writes its description into this
+      // message's history row so routeCommand's history fetch (and any later
+      // "foto yang tadi" question) picks it up. Failures degrade to
+      // answering from the caption alone.
+      if (imageInfo) {
         try {
-          const buffer = await downloadMediaMessage(imageInfo.media, "buffer", {});
-          const mime = imageInfo.meta.mimetype || "image/jpeg";
-          const desc = await describeImage(`data:${mime};base64,${buffer.toString("base64")}`, query);
-          if (desc) {
-            const label = imageInfo.quoted ? "membalas foto" : "foto";
-            updateMessageText(messageId, `[${label}: ${desc}]${text ? ` ${text}` : ""}`);
-            if (!query) query = "[foto]";
-          }
+          ctx.imageBuffer = await downloadMediaMessage(imageInfo.media, "buffer", {});
         } catch (err) {
-          console.error("[handler] image describe failed:", err.message);
+          console.error("[handler] image download failed:", err.message);
         }
-        if (!query) return; // no caption and vision failed — nothing to answer
+        if (ctx.imageBuffer && config.llmVisionModel) {
+          try {
+            const mime = imageInfo.meta.mimetype || "image/jpeg";
+            const desc = await describeImage(`data:${mime};base64,${ctx.imageBuffer.toString("base64")}`, query);
+            if (desc) {
+              const label = imageInfo.quoted ? "membalas foto" : "foto";
+              updateMessageText(messageId, `[${label}: ${desc}]${text ? ` ${text}` : ""}`);
+              if (!query) query = "[foto]";
+            }
+          } catch (err) {
+            console.error("[handler] image describe failed:", err.message);
+          }
+        }
+        if (!query) return; // no caption and no description — nothing to answer
       }
       // Longer than the old 35s: a skill chain (e.g. search -> weather) can
       // legitimately take a few LLM rounds plus external API calls.
