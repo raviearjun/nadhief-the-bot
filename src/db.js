@@ -167,10 +167,19 @@ CREATE TABLE IF NOT EXISTS chat_settings (
 `);
 
 export function insertMessage(msg) {
-  db.prepare(
-    `INSERT INTO messages (chat_jid, chat_name, sender_jid, sender_name, sender_number, is_group, text, is_from_me, created_at)
-     VALUES (@chat_jid, @chat_name, @sender_jid, @sender_name, @sender_number, @is_group, @text, @is_from_me, @created_at)`
-  ).run({ sender_number: null, ...msg });
+  const res = db
+    .prepare(
+      `INSERT INTO messages (chat_jid, chat_name, sender_jid, sender_name, sender_number, is_group, text, is_from_me, created_at)
+       VALUES (@chat_jid, @chat_name, @sender_jid, @sender_name, @sender_number, @is_group, @text, @is_from_me, @created_at)`
+    )
+    .run({ sender_number: null, ...msg });
+  return Number(res.lastInsertRowid);
+}
+
+// Used to enrich a stored photo message with its vision description once
+// generated, so chat history (and future "foto yang tadi" questions) see it.
+export function updateMessageText(id, text) {
+  db.prepare(`UPDATE messages SET text = ? WHERE id = ?`).run(text, id);
 }
 
 export function getRecentMessages(chatJid, sinceTs, limit = 200) {

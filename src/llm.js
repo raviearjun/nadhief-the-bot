@@ -95,6 +95,54 @@ async function chatWithTools(messages, { purpose, temperature = 0.3, maxRounds =
   return "Maaf, butuh terlalu banyak langkah buat jawab ini. Coba tanya yang lebih spesifik.";
 }
 
+/**
+ * John's eyes: a separate vision model describes the photo (including
+ * transcribing any visible text), and the description is then fed into the
+ * normal text chat flow — so the main model keeps its personality, memory
+ * and skills while "seeing" what was sent.
+ */
+export async function describeImage(imageDataUrl, hint = "") {
+  if (!config.llmVisionModel) return null;
+
+  const res = await fetch(LLM_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${config.llmApiKey}`,
+    },
+    body: JSON.stringify({
+      model: config.llmVisionModel,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "image_url", image_url: { url: imageDataUrl } },
+            {
+              type: "text",
+              text:
+                "Deskripsikan foto ini secara lengkap tapi padat (dalam bahasa Indonesia): apa yang terlihat, " +
+                "siapa/apa objek utamanya, suasana/konteksnya. Kalau ada teks yang terbaca (struk, screenshot, " +
+                "tanda, dokumen), transkripsikan isinya selengkap mungkin. Jawab langsung deskripsinya saja." +
+                (hint ? `\n\nKonteks dari pengirim: ${hint}` : ""),
+            },
+          ],
+        },
+      ],
+      max_tokens: 1000,
+    }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Vision API error ${res.status}: ${body.slice(0, 200)}`);
+  }
+
+  const data = await res.json();
+  logLlmUsage("vision", data.usage);
+  return data.choices[0].message.content?.trim() || null;
+}
+
 const URL_RE = /https?:\/\/[^\s)>\]]+/gi;
 
 export function extractLinks(text) {
@@ -310,6 +358,9 @@ export async function answerQuestion(history, facts = [], senderName = "", notes
     "Gunakan bahasa yang sama dengan pertanyaan user. " +
     "Kamu punya akses ke riwayat chat dan fakta tersimpan sebagai konteks — gunakan untuk " +
     "mengingat apa yang sudah dibahas, jangan bilang kamu tidak punya memori. " +
+    "Pesan berisi foto muncul di riwayat sebagai '[foto: deskripsi]' atau '[membalas foto: deskripsi]' — " +
+    "deskripsi itu hasil penglihatanmu sendiri, jadi jawab seolah kamu melihat fotonya langsung; " +
+    "jangan pernah bilang kamu tidak bisa melihat gambar. " +
     "Jangan pernah tertukar antara nama kamu sendiri dan nama lawan bicara — " +
     `jika lawan bicara menyapa dengan nama "${config.botDisplayName}", itu memanggil KAMU, bukan diri mereka sendiri. ` +
     "Di riwayat chat grup, tiap pesan user diberi label 'Nama: isi pesan' — pakai itu untuk tahu SIAPA yang " +

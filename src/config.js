@@ -16,6 +16,9 @@ export const config = {
   // low/medium/high; non-reasoning models ignore or reject unknown fields, so
   // leave unset unless the configured model actually supports it.
   llmReasoningEffort: process.env.LLM_REASONING_EFFORT || "",
+  // Separate vision-capable model on the same endpoint (the chat model stays
+  // text-only). Empty = photo understanding disabled.
+  llmVisionModel: process.env.LLM_VISION_MODEL || "",
   tavilyApiKey: process.env.TAVILY_API_KEY || "", // optional — web search tool disabled if empty
   youtubeApiKey: process.env.YOUTUBE_API_KEY || "", // optional — YouTube search skill disabled if empty
   githubToken: process.env.GITHUB_TOKEN || "", // optional — GitHub skills disabled if empty

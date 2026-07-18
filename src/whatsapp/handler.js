@@ -1,6 +1,7 @@
 import { config } from "../config.js";
 import {
   insertMessage,
+  updateMessageText,
   isWhitelisted,
   normalizeNumber,
   upsertLidMapping,
@@ -18,7 +19,8 @@ import {
   updateChatSettings,
   isRecentExchange,
 } from "../db.js";
-import { summarizeMessages, answerQuestion, analyzeMessage, extractLinks } from "../llm.js";
+import { downloadMediaMessage } from "@whiskeysockets/baileys";
+import { summarizeMessages, answerQuestion, analyzeMessage, extractLinks, describeImage } from "../llm.js";
 import { buildSkills } from "../skills/index.js";
 import { isGoogleConnected } from "../google.js";
 import { getSocket } from "./connection.js";
@@ -74,8 +76,18 @@ function bareNumber(jid) {
   return jid?.split("@")[0]?.split(":")[0] ?? "";
 }
 
+// contextInfo (mentions, quoted message) lives inside whichever content
+// container the message uses — extendedTextMessage for plain text replies,
+// imageMessage for photo captions, etc. Scan them all.
+function getContextInfo(m) {
+  for (const content of Object.values(m.message ?? {})) {
+    if (content && typeof content === "object" && content.contextInfo) return content.contextInfo;
+  }
+  return null;
+}
+
 function isMentioned(m, waState) {
-  const mentioned = m.message?.extendedTextMessage?.contextInfo?.mentionedJid ?? [];
+  const mentioned = getContextInfo(m)?.mentionedJid ?? [];
   const ownIds = [waState.ownJid, waState.ownLid].filter(Boolean).map(bareNumber);
   if (mentioned.some((j) => ownIds.includes(bareNumber(j)))) return true;
   return getMessageText(m).toLowerCase().includes(config.botTriggerName);
@@ -85,13 +97,7 @@ function isMentioned(m, waState) {
 // bot, trigger word or not. The quoted participant may be the bot's phone
 // jid or its privacy lid depending on the chat — match either.
 function isReplyToBot(m, waState) {
-  let participant = null;
-  for (const content of Object.values(m.message ?? {})) {
-    if (content && typeof content === "object" && content.contextInfo?.participant) {
-      participant = content.contextInfo.participant;
-      break;
-    }
-  }
+  const participant = getContextInfo(m)?.participant;
   if (!participant) return false;
   const ownIds = [waState.ownJid, waState.ownLid].filter(Boolean).map(bareNumber);
   return ownIds.includes(bareNumber(participant));
@@ -228,7 +234,26 @@ export function createMessageHandler({ waState }) {
     }
     const senderName = m.pushName || senderNumber;
     const text = getMessageText(m).trim();
-    if (!text) return;
+
+    // Photo attached directly, or a swipe-reply to an earlier photo ("john
+    // ini gambar apa?"). For quoted photos the full media descriptor
+    // (mediaKey etc.) rides along in quotedMessage, so it stays downloadable.
+    const ctxInfo = getContextInfo(m);
+    let imageInfo = null;
+    if (m.message?.imageMessage) {
+      imageInfo = { media: m, meta: m.message.imageMessage, quoted: false };
+    } else if (ctxInfo?.quotedMessage?.imageMessage) {
+      imageInfo = {
+        media: {
+          key: { remoteJid: chatJid, id: ctxInfo.stanzaId, participant: ctxInfo.participant },
+          message: ctxInfo.quotedMessage,
+        },
+        meta: ctxInfo.quotedMessage.imageMessage,
+        quoted: true,
+      };
+    }
+
+    if (!text && !imageInfo) return;
 
     // Whitelist is the single source of truth for who may talk to the bot —
     // in DMs AND in groups. The owner is auto-added at startup (index.js).
@@ -244,14 +269,14 @@ export function createMessageHandler({ waState }) {
 
     if (whitelisted) upsertContact(senderNumber, senderName);
 
-    insertMessage({
+    const messageId = insertMessage({
       chat_jid: chatJid,
       chat_name: isGroup ? m.key.remoteJid : senderName,
       sender_jid: senderJid,
       sender_name: senderName,
       sender_number: senderNumber,
       is_group: isGroup ? 1 : 0,
-      text,
+      text: imageInfo && !imageInfo.quoted ? `[foto]${text ? ` ${text}` : ""}` : text,
       is_from_me: 0,
       created_at: Date.now(),
     });
@@ -320,8 +345,8 @@ export function createMessageHandler({ waState }) {
 
     if (!shouldReply) return;
 
-    const query = isGroup ? stripTrigger(text) : text;
-    if (!query) return;
+    let query = isGroup ? stripTrigger(text) : text;
+    if (!query && !(imageInfo && config.llmVisionModel)) return;
 
     // In a DM, also pull in notes from any group chats this person is part of —
     // otherwise "jadwal kita" discussed in the group looks invisible when the
@@ -350,6 +375,25 @@ export function createMessageHandler({ waState }) {
     const stopTyping = startTyping(live, chatJid);
 
     try {
+      // See the photo before answering: the vision model's description is
+      // written into this message's history row, so routeCommand's history
+      // fetch (and any later "foto yang tadi" question) picks it up. Vision
+      // failures degrade to answering from the caption alone.
+      if (imageInfo && config.llmVisionModel) {
+        try {
+          const buffer = await downloadMediaMessage(imageInfo.media, "buffer", {});
+          const mime = imageInfo.meta.mimetype || "image/jpeg";
+          const desc = await describeImage(`data:${mime};base64,${buffer.toString("base64")}`, query);
+          if (desc) {
+            const label = imageInfo.quoted ? "membalas foto" : "foto";
+            updateMessageText(messageId, `[${label}: ${desc}]${text ? ` ${text}` : ""}`);
+            if (!query) query = "[foto]";
+          }
+        } catch (err) {
+          console.error("[handler] image describe failed:", err.message);
+        }
+        if (!query) return; // no caption and vision failed — nothing to answer
+      }
       // Longer than the old 35s: a skill chain (e.g. search -> weather) can
       // legitimately take a few LLM rounds plus external API calls.
       let rawReply;
