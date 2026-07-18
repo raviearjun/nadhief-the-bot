@@ -14,6 +14,9 @@ import {
   upsertContact,
   getGroupChatsForPerson,
   getNotesForChats,
+  getChatSettings,
+  updateChatSettings,
+  isRecentExchange,
 } from "../db.js";
 import { summarizeMessages, answerQuestion, analyzeMessage, extractLinks } from "../llm.js";
 import { buildSkills } from "../skills/index.js";
@@ -23,6 +26,9 @@ import { toWhatsAppFormat } from "../format.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const REMINDER_CMD_RE = /^\/remind\s+(\d+[smh]|\d{1,2}:\d{2})\s+(.+)$/i;
+// Minimum gap between uninvited group interjections — the difference between
+// "helpful" and "sok asik".
+const UNSOLICITED_COOLDOWN_MS = 10 * 60_000;
 
 // sock.sendMessage() to a group can internally hang fetching group metadata
 // (seen on this server's flaky network) without ever resolving OR rejecting —
@@ -68,10 +74,27 @@ function bareNumber(jid) {
   return jid?.split("@")[0]?.split(":")[0] ?? "";
 }
 
-function isMentioned(m, ownJid) {
+function isMentioned(m, waState) {
   const mentioned = m.message?.extendedTextMessage?.contextInfo?.mentionedJid ?? [];
-  if (ownJid && mentioned.includes(ownJid)) return true;
+  const ownIds = [waState.ownJid, waState.ownLid].filter(Boolean).map(bareNumber);
+  if (mentioned.some((j) => ownIds.includes(bareNumber(j)))) return true;
   return getMessageText(m).toLowerCase().includes(config.botTriggerName);
+}
+
+// A swipe-reply to one of the bot's own messages is always addressed to the
+// bot, trigger word or not. The quoted participant may be the bot's phone
+// jid or its privacy lid depending on the chat — match either.
+function isReplyToBot(m, waState) {
+  let participant = null;
+  for (const content of Object.values(m.message ?? {})) {
+    if (content && typeof content === "object" && content.contextInfo?.participant) {
+      participant = content.contextInfo.participant;
+      break;
+    }
+  }
+  if (!participant) return false;
+  const ownIds = [waState.ownJid, waState.ownLid].filter(Boolean).map(bareNumber);
+  return ownIds.includes(bareNumber(participant));
 }
 
 function stripTrigger(text) {
@@ -102,6 +125,29 @@ function startTyping(getSock, chatJid) {
 async function routeCommand(query, ctx) {
   const { chatJid, senderName, senderNumber, isGroup } = ctx;
   const lower = query.toLowerCase();
+
+  // Proactive-mode controls, regex-based so they always work even when the
+  // LLM is having a bad day. Scoped per group chat.
+  if (isGroup) {
+    // Short imperative only ("diem dulu", "kalem dong") — a longer sentence
+    // containing the word ("kok diem aja sih?") is conversation, not a command.
+    if (
+      lower.length <= 25 &&
+      /(^|\s)(diem|diam|kalem)\b/.test(lower) &&
+      !/\b(kok|kenapa|knp|jangan|nggak|gak|ga)\b/.test(lower)
+    ) {
+      updateChatSettings(chatJid, { muted_until: Date.now() + 60 * 60_000 });
+      return "Siap, John kalem dulu sejam 🤐 Kalau butuh, panggil nama John atau reply pesan John aja.";
+    }
+    if (/\bpasif\b/.test(lower)) {
+      updateChatSettings(chatJid, { proactive: 0 });
+      return "Oke, mode pasif: John cuma jawab kalau dipanggil atau di-reply di grup ini. 🫡";
+    }
+    if (/\b(proaktif|bangun|aktif lagi)\b/.test(lower)) {
+      updateChatSettings(chatJid, { proactive: 1, muted_until: 0 });
+      return "John aktif lagi! 😎 Siap nimbrung kalau ada yang bisa dibantu.";
+    }
+  }
 
   // Fast-path slash commands stay regex-based for reliability; everything
   // else goes to the LLM, which picks the right skill(s) itself.
@@ -144,7 +190,10 @@ async function routeCommand(query, ctx) {
           "• 📧 Gmail: \"ada email penting?\", \"kirim email ke X\" (selalu konfirmasi dulu)\n" +
           "• 📊 Sheets: \"catat pengeluaran 50rb makan ke spreadsheet\", \"isi sheet X apa aja?\"\n"
         : "") +
-      (isGroup ? "• 👥 Grup: \"tag semua\", \"bikin polling ...\", \"ringkasan harian jam 21:00\"\n" : "") +
+      (isGroup
+        ? "• 👥 Grup: \"tag semua\", \"bikin polling ...\", \"ringkasan harian jam 21:00\"\n" +
+          "• 🤫 John kadang nimbrung sendiri kalau relevan — \"john diem\" (kalem 1 jam), \"john pasif\"/\"john proaktif\" (atur mode)\n"
+        : "") +
       (ctx.isOwner ? "• 🔐 Whitelist (owner): \"tambahin 0812xxx ke whitelist, itu Budi\", \"lihat whitelist\"\n" : "") +
       "\nPerintah cepat: /summary (ringkas 24 jam), /notes, /remind 10m pesan (atau 15:00)."
     );
@@ -211,18 +260,64 @@ export function createMessageHandler({ waState }) {
       for (const link of extractLinks(text)) {
         addNote(chatJid, link, "link");
       }
-      // Single combined pass: note-worthiness + durable facts about the
-      // sender (facts keyed by phone number so they follow the person across
-      // DMs and groups without blending with others).
-      analyzeMessage(text, senderName)
-        .then(({ note, facts }) => {
-          if (note) addNote(chatJid, note, "note");
-          facts.forEach((f) => upsertFact(senderNumber, f.key, f.value));
-        })
-        .catch((err) => console.error("[handler] analyzeMessage failed:", err));
     }
 
-    const shouldReply = whitelisted && (isGroup ? isMentioned(m, waState.ownJid) : true);
+    // Tier-0 triggers, cheapest first: explicit mention/trigger word, a
+    // swipe-reply to one of the bot's own messages, or a follow-up moments
+    // after the bot spoke by someone who was in that exchange.
+    const triggered =
+      isGroup && (isMentioned(m, waState) || isReplyToBot(m, waState) || isRecentExchange(chatJid, senderNumber));
+    let shouldReply = whitelisted && (isGroup ? triggered : true);
+    let proactive = false;
+
+    if (whitelisted) {
+      // Tier 1: not addressed, but maybe worth joining anyway. The join
+      // decision piggybacks on the analyze pass that runs per message
+      // regardless (notes + facts), so it costs no extra LLM call — just a
+      // slightly bigger prompt. Guardrails: per-chat toggle, mute window,
+      // and a cooldown between uninvited interjections.
+      const settings = isGroup ? getChatSettings(chatJid) : null;
+      const canConsiderJoin =
+        isGroup &&
+        !shouldReply &&
+        settings.proactive === 1 &&
+        settings.muted_until < Date.now() &&
+        Date.now() - settings.last_unsolicited_at > UNSOLICITED_COOLDOWN_MS;
+
+      if (canConsiderJoin) {
+        const groupContext = getRecentHistory(chatJid, 9)
+          .filter((r) => r.text !== text || r.is_from_me) // current message is passed separately
+          .slice(-8)
+          .map((r) => `${r.is_from_me ? config.botDisplayName : r.sender_name || r.sender_number}: ${r.text.slice(0, 200)}`)
+          .join("\n");
+        try {
+          const { note, facts, join, joinReason } = await analyzeMessage(text, senderName, { groupContext });
+          if (note) addNote(chatJid, note, "note");
+          facts.forEach((f) => upsertFact(senderNumber, f.key, f.value));
+          if (join) {
+            // Record before generating the reply so a burst of messages
+            // can't all decide to join within the same cooldown window.
+            updateChatSettings(chatJid, { last_unsolicited_at: Date.now() });
+            proactive = true;
+            shouldReply = true;
+            console.log(`[handler] proactive join: ${joinReason || "(no reason given)"}`);
+          }
+        } catch (err) {
+          console.error("[handler] analyzeMessage failed:", err);
+        }
+      } else {
+        // Single combined pass: note-worthiness + durable facts about the
+        // sender (facts keyed by phone number so they follow the person
+        // across DMs and groups without blending with others).
+        analyzeMessage(text, senderName)
+          .then(({ note, facts }) => {
+            if (note) addNote(chatJid, note, "note");
+            facts.forEach((f) => upsertFact(senderNumber, f.key, f.value));
+          })
+          .catch((err) => console.error("[handler] analyzeMessage failed:", err));
+      }
+    }
+
     if (!shouldReply) return;
 
     const query = isGroup ? stripTrigger(text) : text;

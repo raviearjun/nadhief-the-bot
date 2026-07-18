@@ -17,6 +17,7 @@ export const waState = {
   status: "disconnected", // disconnected | connecting | qr | connected
   qrDataUrl: null,
   ownJid: null,
+  ownLid: null, // privacy LID — groups often reference the bot by this, not the phone jid
 };
 
 let sock = null;
@@ -73,8 +74,9 @@ export async function startWhatsApp(onMessage) {
       waState.status = "connected";
       waState.qrDataUrl = null;
       waState.ownJid = sock.user?.id ?? null;
+      waState.ownLid = sock.user?.lid ?? null;
       reconnectAttempts = 0;
-      console.log("[wa] connected as", waState.ownJid);
+      console.log("[wa] connected as", waState.ownJid, waState.ownLid ? `(lid ${waState.ownLid})` : "");
     }
 
     if (connection === "close") {
@@ -88,6 +90,7 @@ export async function startWhatsApp(onMessage) {
       waState.status = "disconnected";
       waState.qrDataUrl = null;
       waState.ownJid = null;
+      waState.ownLid = null;
 
       if (loggedOut) {
         // Device was removed/unlinked from the phone — old creds are dead.

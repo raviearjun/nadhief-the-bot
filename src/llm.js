@@ -109,8 +109,12 @@ export function extractLinks(text) {
  * halves the per-message overhead, and the fully static system prompt makes
  * repeat calls hit DeepSeek's automatic context cache.
  */
-export async function analyzeMessage(text, senderDisplayName) {
-  if (!text || text.trim().length < 10) return { note: null, facts: [] };
+export async function analyzeMessage(text, senderDisplayName, { groupContext } = {}) {
+  const none = { note: null, facts: [], join: false, joinReason: "" };
+  // Short messages carry no notes/facts, but in a group they can still
+  // warrant a join decision ("gimana dong?"), so only skip them when there's
+  // no group context to judge against.
+  if (!text || text.trim().length < (groupContext ? 3 : 10)) return none;
 
   const raw = await chat(
     [
@@ -118,15 +122,31 @@ export async function analyzeMessage(text, senderDisplayName) {
         role: "system",
         content:
           "You analyze one WhatsApp message and reply with strict JSON only:\n" +
-          '{"note": string, "facts": [{"key": string, "value": string}]}\n' +
+          '{"note": string, "facts": [{"key": string, "value": string}], "join": boolean, "join_reason": string}\n' +
           "note: ONLY if the message contains genuinely important info (decision, deadline, action item, key fact, schedule) — " +
           'a summary under 25 words in the message\'s language. Otherwise "".\n' +
           "facts: durable facts ABOUT THE SENDER themselves (their name, job, preferences, important dates, " +
           "relationships, ongoing projects). NOT one-off requests, questions, or small talk; NOT facts about the " +
           'bot or about third parties mentioned in passing. Use short snake_case keys, reuse common keys like "name", ' +
-          '"job", "birthday". Empty array if none. The sender\'s display name (possibly a nickname) is given by the user message prefix.',
+          '"job", "birthday". Empty array if none. The sender\'s display name (possibly a nickname) is given by the user message prefix.\n' +
+          `join: only meaningful when a "Percakapan grup terakhir" block is present — it means the assistant ` +
+          `"${config.botDisplayName}" (a helpful bot in this group with tools for web search, weather, schedules, ` +
+          "currency, calculations, reminders, files, etc.) was NOT addressed in the new message. Decide whether it " +
+          "should chime in anyway. true ONLY when clearly valuable: (a) an open question or request that no human " +
+          "has answered and the assistant can genuinely solve with its tools or knowledge, (b) the message talks " +
+          "about the assistant or is implicitly directed at it, or (c) someone needs info the assistant likely has " +
+          "saved. NEVER join casual banter between people, personal or emotional exchanges, or messages clearly " +
+          "aimed at another specific person. When in doubt: false.\n" +
+          'join_reason: short reason when join is true, otherwise "".',
       },
-      { role: "user", content: `Pengirim: ${senderDisplayName}\nPesan: ${text}` },
+      {
+        role: "user",
+        content:
+          `Pengirim: ${senderDisplayName}\nPesan: ${text}` +
+          (groupContext
+            ? `\n\nPercakapan grup terakhir (paling lama dulu):\n${groupContext}\n\n(Asisten TIDAK disebut/dipanggil di pesan baru ini.)`
+            : ""),
+      },
     ],
     { purpose: "analyze", temperature: 0 }
   );
@@ -136,9 +156,11 @@ export async function analyzeMessage(text, senderDisplayName) {
     return {
       note: parsed.note ? String(parsed.note) : null,
       facts: Array.isArray(parsed.facts) ? parsed.facts.filter((f) => f?.key && f?.value) : [],
+      join: Boolean(groupContext) && parsed.join === true,
+      joinReason: parsed.join_reason ? String(parsed.join_reason) : "",
     };
   } catch {
-    return { note: null, facts: [] };
+    return none;
   }
 }
 

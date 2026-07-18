@@ -154,6 +154,16 @@ CREATE TABLE IF NOT EXISTS summaries (
   content TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
+
+-- Per-chat knobs for proactive mode (bot joining a group conversation
+-- without being mentioned): on/off toggle, temporary mute, and the
+-- timestamp of the last uninvited interjection (for the cooldown).
+CREATE TABLE IF NOT EXISTS chat_settings (
+  chat_jid TEXT PRIMARY KEY,
+  proactive INTEGER NOT NULL DEFAULT 1,
+  muted_until INTEGER NOT NULL DEFAULT 0,
+  last_unsolicited_at INTEGER NOT NULL DEFAULT 0
+);
 `);
 
 export function insertMessage(msg) {
@@ -402,6 +412,49 @@ export function getGroupsWithSummaryAt(hour, minute) {
     .prepare(`SELECT chat_jid FROM group_settings WHERE summary_hour = ? AND summary_minute = ?`)
     .all(hour, minute)
     .map((r) => r.chat_jid);
+}
+
+export function getChatSettings(chatJid) {
+  return (
+    db.prepare(`SELECT * FROM chat_settings WHERE chat_jid = ?`).get(chatJid) ?? {
+      chat_jid: chatJid,
+      proactive: 1,
+      muted_until: 0,
+      last_unsolicited_at: 0,
+    }
+  );
+}
+
+export function updateChatSettings(chatJid, patch) {
+  const next = { ...getChatSettings(chatJid), ...patch };
+  db.prepare(
+    `INSERT INTO chat_settings (chat_jid, proactive, muted_until, last_unsolicited_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(chat_jid) DO UPDATE SET
+       proactive = excluded.proactive,
+       muted_until = excluded.muted_until,
+       last_unsolicited_at = excluded.last_unsolicited_at`
+  ).run(chatJid, next.proactive, next.muted_until, next.last_unsolicited_at);
+}
+
+/**
+ * "Conversation continuation" check: the bot replied in this chat moments
+ * ago, and this sender was part of the exchange leading up to that reply —
+ * so their follow-up is almost certainly addressed to the bot even without
+ * the trigger word ("howw?" right after the bot offered something).
+ * Participation is bounded to BEFORE the bot's reply so a bystander jumping
+ * in right after doesn't count.
+ */
+export function isRecentExchange(chatJid, senderNumber, { replyWindowMs = 120_000, participationWindowMs = 300_000 } = {}) {
+  const lastBot = db
+    .prepare(`SELECT created_at FROM messages WHERE chat_jid = ? AND is_from_me = 1 ORDER BY created_at DESC LIMIT 1`)
+    .get(chatJid);
+  if (!lastBot || Date.now() - lastBot.created_at > replyWindowMs) return false;
+  return !!db
+    .prepare(
+      `SELECT 1 FROM messages WHERE chat_jid = ? AND sender_number = ? AND is_from_me = 0
+       AND created_at BETWEEN ? AND ? LIMIT 1`
+    )
+    .get(chatJid, senderNumber, lastBot.created_at - participationWindowMs, lastBot.created_at);
 }
 
 export function saveGoogleAuth({ email, refreshToken, accessToken, expiryDate }) {
