@@ -98,6 +98,36 @@ async function createSheet(title, headers, rows) {
   return { ok: true, url: res.data.spreadsheetUrl };
 }
 
+async function updateSheet(spreadsheetName, values, { tab, range, clear } = {}) {
+  const found = await resolveSpreadsheet(spreadsheetName);
+  if (found.error) return found;
+  const sheets = google.sheets({ version: "v4", auth: auth() });
+  const spreadsheetId = found.file.id;
+
+  const meta = await sheets.spreadsheets.get({ spreadsheetId, fields: "sheets(properties(title))" });
+  const tabs = meta.data.sheets.map((s) => s.properties.title);
+  let target = tab || tabs[0] || "Sheet1";
+
+  // "Put the budget in its own tab" should work without a separate tool —
+  // create the tab on the fly when it doesn't exist yet.
+  if (!tabs.includes(target)) {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: { requests: [{ addSheet: { properties: { title: target } } }] },
+    });
+  } else if (clear) {
+    await sheets.spreadsheets.values.clear({ spreadsheetId, range: target });
+  }
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range: `${target}!${range || "A1"}`,
+    valueInputOption: "USER_ENTERED",
+    requestBody: { values: values.map((r) => r.map((v) => String(v))) },
+  });
+  return { ok: true, spreadsheet: found.file.name, tab: target, link: found.file.webViewLink };
+}
+
 export function skills() {
   if (!isGoogleConnected()) return [];
 
@@ -127,6 +157,37 @@ export function skills() {
         },
       },
       execute: ({ title, headers, rows }) => createSheet(title, headers, rows).catch(friendlyError),
+    },
+    {
+      definition: {
+        type: "function",
+        function: {
+          name: "update_sheet",
+          description:
+            "Write/rewrite data in an EXISTING Google Sheets spreadsheet (found by approximate name): " +
+            "replace or restructure its contents, fill a specific range, or write into a specific tab " +
+            "(the tab is created automatically if it doesn't exist — great for adding e.g. a 'Budget' tab " +
+            "to an existing spreadsheet instead of creating a whole new file). Use this when improving or " +
+            "extending a spreadsheet that was already created, instead of create_google_sheet.",
+          parameters: {
+            type: "object",
+            properties: {
+              spreadsheet: { type: "string", description: "Spreadsheet name (approximate ok)" },
+              values: {
+                type: "array",
+                items: { type: "array", items: { type: "string" } },
+                description: "2D array of rows to write, each an array of cell values (include the header row when rewriting)",
+              },
+              tab: { type: "string", description: "Optional tab name; default = first tab. Created if missing." },
+              range: { type: "string", description: "Optional A1 start cell within the tab, default A1" },
+              clear: { type: "boolean", description: "true = clear the tab first (full rewrite instead of overlay)" },
+            },
+            required: ["spreadsheet", "values"],
+          },
+        },
+      },
+      execute: ({ spreadsheet, values, tab, range, clear }) =>
+        updateSheet(spreadsheet, values ?? [], { tab, range, clear }).catch(friendlyError),
     },
     {
       definition: {

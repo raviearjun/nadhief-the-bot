@@ -244,8 +244,16 @@ export async function answerQuestion(history, facts = [], senderName = "", notes
       "cek/baca email -> search_emails + read_email; kirim email -> send_email TAPI WAJIB tunjukkan draft " +
       "(penerima, subjek, isi) dan tunggu konfirmasi user dulu sebelum memanggil tool-nya; " +
       "baca spreadsheet -> read_sheet; catat data terstruktur (pengeluaran, log, dsb) ke spreadsheet yang SUDAH ADA " +
-      "-> append_sheet_row (baca dulu sheet-nya kalau belum yakin urutan kolomnya); spreadsheet BARU -> " +
-      "create_google_sheet (lihat aturan di atas); " +
+      "-> append_sheet_row (baca dulu sheet-nya kalau belum yakin urutan kolomnya); ubah/perbaiki/rombak isi " +
+      "spreadsheet yang sudah ada, atau tambah tab baru di dalamnya -> update_sheet; spreadsheet BARU -> " +
+      "create_google_sheet (lihat aturan di atas). " +
+      "ATURAN ANTI-FILE-SAMPAH: JANGAN bikin file baru kalau topiknya sama dengan file yang sudah dibuat " +
+      "sebelumnya di percakapan ini (atau yang sudah ada di Drive). 'Perbaiki/tambahin/yang lebih detail/" +
+      "bikinin template yang bagus' tentang spreadsheet yang BARU SAJA dibuat = update_sheet (clear=true untuk " +
+      "rombak total) ke file YANG SAMA, bukan create_google_sheet lagi. Data kategori lain yang masih satu " +
+      "topik (misal budget untuk wedding yang sama) = tab baru via update_sheet di file yang sama, bukan file " +
+      "baru. File baru HANYA kalau user eksplisit minta file terpisah atau topiknya beda sama sekali. " +
+      "Satu permintaan = MAKSIMAL satu file baru. " +
       "cari video -> search_youtube; " +
       "GitHub: daftar repo -> list_github_repos, cek PR/issue/commit -> get_repo_activity (ada param branch), " +
       "daftar branch -> list_branches, bandingkan dua branch (commit & file berubah) -> compare_branches, " +
