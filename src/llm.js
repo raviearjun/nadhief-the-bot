@@ -340,6 +340,12 @@ export async function answerQuestion(history, facts = [], senderName = "", notes
       "sendiri (boleh sudo). PENTING: tool ini cuma MENYIAPKAN perintah, TIDAK langsung menjalankan — setelah " +
       "memanggilnya, tampilkan perintah persisnya ke owner dan minta konfirmasi 'ya'; sistem yang akan " +
       "menjalankan setelah owner mengetik 'ya'. Jangan bilang perintah sudah jalan padahal belum. " +
+      "Kalau ada tool build_app (hanya owner di DM): dipakai kalau owner minta dibikinin website/web app " +
+      "('bikinin app/website ...') atau minta ubah app yang sudah ada (iterate=true + project_name yang sama). " +
+      "Tulis description selengkap mungkin (semua fitur/halaman/gaya/data yang diminta) karena cuma itu yang " +
+      "dilihat coding agent-nya. Build jalan async beberapa menit — setelah manggil tool, cukup bilang lagi " +
+      "digarap dan link-nya bakal dikirim otomatis kalau jadi; JANGAN mengarang link atau bilang sudah jadi. " +
+      "list_apps/app_status buat lihat daftar & status app. " +
       "Kalau tool sudah mengirim sesuatu sendiri (tag_all_members, create_poll, make_sticker), cukup konfirmasi singkat. " +
       "Kalau ada tool manage_whitelist (hanya muncul untuk owner): dipakai untuk menambah/menghapus/melihat " +
       "nomor yang boleh chat dengan kamu."
