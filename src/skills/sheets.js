@@ -71,9 +71,10 @@ async function appendRow(spreadsheetName, values, tab) {
 async function createSheet(title, headers, rows) {
   const sheets = google.sheets({ version: "v4", auth: auth() });
 
+  // No `fields` mask here: unlike Drive, Sheets' spreadsheets.create rejects
+  // the fields parameter outright with 400 INVALID_ARGUMENT.
   const res = await sheets.spreadsheets.create({
     requestBody: { properties: { title }, sheets: [{ properties: { title: "Sheet1" } }] },
-    fields: "spreadsheetId, spreadsheetUrl",
   });
   const spreadsheetId = res.data.spreadsheetId;
 
