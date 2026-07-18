@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>John — Dashboard</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f4f6f8;
+    --card: #ffffff;
+    --border: #e3e8ee;
+    --text: #1a2330;
+    --muted: #64748b;
+    --accent: #10b981;
+    --accent-dark: #059669;
+    --accent-soft: #10b98118;
+    --danger: #ef4444;
+    --bubble-me: #d9fdd3;
+    --bubble-me-text: #123f22;
+    --shadow: 0 1px 3px #0000000f, 0 1px 2px #0000000a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f151c;
+      --card: #17202b;
+      --border: #253243;
+      --text: #e6edf3;
+      --muted: #8b98a9;
+      --accent-soft: #10b98122;
+      --bubble-me: #005c4b;
+      --bubble-me-text: #d9fdd3;
+      --shadow: 0 1px 3px #00000055;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+  }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 1rem; }
+
+  header {
+    display: flex; align-items: center; justify-content: space-between; gap: 0.8rem;
+    padding: 0.4rem 0 1rem;
+  }
+  .brand { display: flex; align-items: center; gap: 0.6rem; font-weight: 700; font-size: 1.15rem; }
+  .brand .logo {
+    width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center;
+    background: linear-gradient(135deg, var(--accent), #34d399); font-size: 1.2rem;
+  }
+  .conn { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; color: var(--muted); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--danger); }
+  .dot.connected { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .dot.qr { background: #f59e0b; }
+
+  .tabs {
+    display: flex; gap: 0.35rem; margin-bottom: 1.1rem; flex-wrap: nowrap;
+    overflow-x: auto; padding-bottom: 0.3rem; scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs button {
+    background: var(--card); color: var(--muted); border: 1px solid var(--border);
+    padding: 0.45rem 0.85rem; border-radius: 999px; font: inherit; font-size: 0.86rem;
+    cursor: pointer; white-space: nowrap; transition: all 0.15s;
+  }
+  .tabs button:hover { color: var(--text); }
+  .tabs button.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 1.1rem 1.2rem; margin-bottom: 1rem; box-shadow: var(--shadow);
+  }
+  h1 { font-size: 1.1rem; margin: 0; }
+  h3 { font-size: 0.95rem; margin: 0 0 0.7rem; }
+  .hint { color: var(--muted); font-size: 0.82rem; }
+
+  input, select, button.btn {
+    font: inherit; padding: 0.5rem 0.75rem; border-radius: 9px;
+    border: 1px solid var(--border); background: var(--card); color: var(--text);
+  }
+  select { cursor: pointer; max-width: 100%; }
+  button.btn { cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.primary:hover { background: var(--accent-dark); }
+  button.ghost { background: transparent; color: var(--muted); }
+  button.ghost:hover { color: var(--danger); border-color: var(--danger); }
+  .row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  th { text-align: left; color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  th, td { padding: 0.5rem 0.55rem; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: none; }
+
+  .status-badge { padding: 0.25rem 0.7rem; border-radius: 999px; font-size: 0.8rem; font-weight: 600; }
+  .status-connected { background: var(--accent-soft); color: var(--accent); }
+  .status-qr { background: #f59e0b22; color: #d97706; }
+  .status-disconnected { background: #ef444422; color: var(--danger); }
+  #qr { max-width: 250px; border-radius: 12px; margin-top: 0.8rem; }
+
+  /* ===== Chat bubbles ===== */
+  .chat-box {
+    display: flex; flex-direction: column; gap: 0.45rem;
+    max-height: 65vh; overflow-y: auto; padding: 0.8rem;
+    background: var(--bg); border-radius: 12px; border: 1px solid var(--border);
+  }
+  .bubble {
+    max-width: 78%; padding: 0.5rem 0.75rem; border-radius: 12px;
+    background: var(--card); box-shadow: var(--shadow); font-size: 0.88rem;
+    white-space: pre-wrap; word-break: break-word; align-self: flex-start;
+    border-top-left-radius: 4px;
+  }
+  .bubble.me {
+    align-self: flex-end; background: var(--bubble-me); color: var(--bubble-me-text);
+    border-top-left-radius: 12px; border-top-right-radius: 4px;
+  }
+  .bubble .who { font-size: 0.72rem; font-weight: 700; color: var(--accent); margin-bottom: 0.15rem; }
+  .bubble.me .who { color: inherit; opacity: 0.75; }
+  .bubble .time { font-size: 0.68rem; opacity: 0.55; text-align: right; margin-top: 0.2rem; }
+  .day-sep { align-self: center; font-size: 0.72rem; color: var(--muted); background: var(--card); border: 1px solid var(--border); padding: 0.15rem 0.7rem; border-radius: 999px; margin: 0.4rem 0; }
+
+  /* ===== Notes ===== */
+  .notes-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 0.7rem; }
+  .note-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 0.75rem 0.85rem; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 0.45rem;
+    border-left: 3px solid var(--accent);
+  }
+  .note-card.kind-link { border-left-color: #3b82f6; }
+  .note-head { display: flex; align-items: center; justify-content: space-between; gap: 0.4rem; }
+  .kind-badge {
+    font-size: 0.7rem; font-weight: 700; padding: 0.15rem 0.55rem; border-radius: 999px;
+    background: var(--accent-soft); color: var(--accent); text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .kind-badge.link { background: #3b82f622; color: #3b82f6; }
+  .note-content { font-size: 0.88rem; word-break: break-word; white-space: pre-wrap; }
+  .note-content a { color: #3b82f6; text-decoration: none; }
+  .note-content a:hover { text-decoration: underline; }
+  .note-foot { display: flex; align-items: center; justify-content: space-between; margin-top: auto; }
+  .note-time { font-size: 0.72rem; color: var(--muted); }
+  .note-chat { font-size: 0.72rem; color: var(--muted); background: var(--bg); padding: 0.1rem 0.5rem; border-radius: 999px; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .del-note { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 0.95rem; padding: 0 0.2rem; border-radius: 6px; }
+  .del-note:hover { color: var(--danger); }
+
+  .stat-chips { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 0.9rem; }
+  .chip { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 0.5rem 0.9rem; }
+  .chip .n { font-size: 1.15rem; font-weight: 700; display: block; }
+  .chip .l { font-size: 0.72rem; color: var(--muted); }
+
+  .empty { color: var(--muted); font-size: 0.88rem; text-align: center; padding: 1.5rem 0; }
+  .hidden { display: none; }
+
+  /* login */
+  #login-view { max-width: 350px; margin: 14vh auto 0; }
+  #login-view .logo-big { width: 60px; height: 60px; border-radius: 18px; display: grid; place-items: center; background: linear-gradient(135deg, var(--accent), #34d399); font-size: 2rem; margin: 0 auto 0.8rem; }
+  #login-view input { width: 100%; margin-bottom: 0.6rem; }
+  #login-view button { width: 100%; }
+</style>
+</head>
+<body>
+
+<div id="login-view" class="hidden">
+  <div class="card" style="text-align:center;">
+    <div class="logo-big">🤖</div>
+    <h1 style="margin-bottom:1rem;">John — Dashboard</h1>
+    <input id="login-username" placeholder="Username" autocomplete="username">
+    <input id="login-password" type="password" placeholder="Password" autocomplete="current-password">
+    <button id="login-btn" class="btn primary">Masuk</button>
+    <div id="login-error" style="color:var(--danger);font-size:0.85rem;margin-top:0.6rem;"></div>
+  </div>
+</div>
+
+<div id="app-view" class="wrap hidden">
+  <header>
+    <div class="brand"><div class="logo">🤖</div> John <span class="conn"><span id="conn-dot" class="dot"></span><span id="conn-text">offline</span></span></div>
+    <button class="btn ghost" id="logout-btn">Logout</button>
+  </header>
+
+  <div class="tabs">
+    <button data-tab="connect" class="active">🔌 Connect</button>
+    <button data-tab="messages">💬 Pesan</button>
+    <button data-tab="notes">📝 Catatan</button>
+    <button data-tab="whitelist">🔐 Whitelist</button>
+    <button data-tab="people">👤 People</button>
+    <button data-tab="usage">📊 Usage</button>
+    <button data-tab="google">🔗 Google</button>
+  </div>
+
+  <section id="tab-connect" class="card">
+    <div class="row">
+      <span>Status:</span>
+      <span id="wa-status" class="status-badge status-disconnected">disconnected</span>
+      <span id="wa-jid" class="hint"></span>
+    </div>
+    <div id="qr-wrap"><img id="qr" src="" class="hidden"></div>
+    <p id="qr-hint" class="hint"></p>
+  </section>
+
+  <section id="tab-messages" class="card hidden">
+    <div class="row" style="margin-bottom:0.8rem;">
+      <select id="chat-select" style="flex:1;"></select>
+      <button id="msg-refresh" class="btn">↻</button>
+    </div>
+    <div id="chat-messages" class="chat-box"></div>
+  </section>
+
+  <section id="tab-notes" class="card hidden">
+    <div class="row" style="margin-bottom:0.9rem;">
+      <select id="notes-chat-select" style="flex:1;"></select>
+      <button id="notes-refresh" class="btn">↻</button>
+    </div>
+    <div id="notes-grid" class="notes-grid"></div>
+  </section>
+
+  <section id="tab-whitelist" class="card hidden">
+    <h3>Siapa saja yang boleh chat dengan John</h3>
+    <div class="row" style="margin-bottom:0.8rem;">
+      <input id="wl-number" placeholder="Nomor (0812xxx / 62812xxx)" style="flex:1;">
+      <input id="wl-label" placeholder="Nama (opsional)">
+      <button id="wl-add" class="btn primary">Tambah</button>
+    </div>
+    <p class="hint" style="margin-top:0;">Format 08xx otomatis dinormalisasi ke 628xx.</p>
+    <table>
+      <thead><tr><th>Nomor</th><th>Nama</th><th></th></tr></thead>
+      <tbody id="wl-table"></tbody>
+    </table>
+  </section>
+
+  <section id="tab-people" class="card hidden">
+    <p class="hint" style="margin-top:0;">
+      Fakta disimpan per orang (berdasarkan nomor), bukan per chat — jadi tetap dikenali
+      di DM maupun di semua grup yang sama-sama mereka ikuti.
+    </p>
+    <div class="row" style="margin-bottom:0.8rem;">
+      <select id="person-select" style="flex:1;"></select>
+    </div>
+    <div id="person-facts"></div>
+  </section>
+
+  <section id="tab-usage" class="card hidden">
+    <div id="usage-totals" class="stat-chips"></div>
+    <table>
+      <thead><tr><th>Purpose</th><th>Calls</th><th>Total tokens</th></tr></thead>
+      <tbody id="usage-by-purpose"></tbody>
+    </table>
+  </section>
+
+  <section id="tab-google" class="card hidden">
+    <h3>Google (Calendar · Docs · Drive)</h3>
+    <div id="gcal-status"></div>
+  </section>
+</div>
+
+<script>
+const $ = (sel) => document.querySelector(sel);
+const esc = (s) =>
+  String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const linkify = (escaped) =>
+  escaped.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+const fmtTime = (ts) => new Date(ts).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+const fmtDate = (ts) => new Date(ts).toLocaleDateString("id-ID", { weekday: "short", day: "numeric", month: "short" });
+const fmtFull = (ts) => new Date(ts).toLocaleString("id-ID", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+
+const api = async (url, opts = {}) => {
+  const res = await fetch(url, { headers: { "Content-Type": "application/json" }, ...opts });
+  if (res.status === 401) { showLogin(); throw new Error("unauthorized"); }
+  return res.json();
+};
+
+function showLogin() {
+  $("#login-view").classList.remove("hidden");
+  $("#app-view").classList.add("hidden");
+}
+function showApp() {
+  $("#login-view").classList.add("hidden");
+  $("#app-view").classList.remove("hidden");
+  refreshAll();
+}
+
+$("#login-btn").addEventListener("click", doLogin);
+$("#login-password").addEventListener("keydown", (e) => e.key === "Enter" && doLogin());
+async function doLogin() {
+  const res = await fetch("/api/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: $("#login-username").value, password: $("#login-password").value }),
+  });
+  if (res.ok) showApp();
+  else $("#login-error").textContent = res.status === 429 ? "Terlalu banyak percobaan — tunggu 15 menit." : "Username/password salah.";
+}
+
+$("#logout-btn").addEventListener("click", async () => {
+  await fetch("/api/logout", { method: "POST" });
+  showLogin();
+});
+
+document.querySelectorAll(".tabs button").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tabs button").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    document.querySelectorAll("section[id^='tab-']").forEach((s) => s.classList.add("hidden"));
+    $("#tab-" + btn.dataset.tab).classList.remove("hidden");
+  });
+});
+
+/* ===== status ===== */
+async function refreshStatus() {
+  const s = await api("/api/status");
+  const badge = $("#wa-status");
+  badge.textContent = s.status;
+  badge.className = "status-badge status-" + (s.status === "connected" ? "connected" : s.status === "qr" ? "qr" : "disconnected");
+  $("#wa-jid").textContent = s.ownJid ? "(" + s.ownJid + ")" : "";
+  $("#conn-dot").className = "dot " + (s.status === "connected" ? "connected" : s.status === "qr" ? "qr" : "");
+  $("#conn-text").textContent = s.status === "connected" ? "online" : s.status;
+  const qr = $("#qr");
+  if (s.status === "qr" && s.qrDataUrl) {
+    qr.src = s.qrDataUrl;
+    qr.classList.remove("hidden");
+    $("#qr-hint").textContent = "Buka WhatsApp di HP > Linked Devices > Link a Device, lalu scan QR ini.";
+  } else {
+    qr.classList.add("hidden");
+    $("#qr-hint").textContent = s.status === "connected" ? "Perangkat terhubung." : "";
+  }
+}
+
+/* ===== chats (shared by Pesan & Catatan tabs) ===== */
+let chats = [];
+const chatName = (jid) => chats.find((c) => c.chat_jid === jid)?.chat_name || jid;
+
+async function refreshChats() {
+  chats = await api("/api/chats");
+  const opts = chats
+    .map((c) => `<option value="${esc(c.chat_jid)}">${esc(c.chat_name || c.chat_jid)} · ${c.message_count} pesan</option>`)
+    .join("");
+  $("#chat-select").innerHTML = opts;
+  $("#notes-chat-select").innerHTML = `<option value="">📁 Semua chat</option>` + opts;
+  if (chats.length) loadMessages(chats[0].chat_jid);
+  loadNotes("");
+}
+
+/* ===== Pesan ===== */
+$("#chat-select").addEventListener("change", (e) => loadMessages(e.target.value));
+$("#msg-refresh").addEventListener("click", () => loadMessages($("#chat-select").value));
+
+async function loadMessages(chatJid) {
+  if (!chatJid) return;
+  const messages = await api("/api/messages?chat=" + encodeURIComponent(chatJid));
+  messages.reverse(); // API kirim terbaru dulu; tampilkan kronologis
+  const box = $("#chat-messages");
+  let lastDay = "";
+  let html = "";
+  for (const m of messages) {
+    const day = fmtDate(m.created_at);
+    if (day !== lastDay) { html += `<div class="day-sep">${day}</div>`; lastDay = day; }
+    const mine = !!m.is_from_me;
+    html +=
+      `<div class="bubble${mine ? " me" : ""}">` +
+      (mine ? "" : `<div class="who">${esc(m.sender_name || m.sender_number || "?")}</div>`) +
+      linkify(esc(m.text)) +
+      `<div class="time">${fmtTime(m.created_at)}</div></div>`;
+  }
+  box.innerHTML = html || `<div class="empty">Belum ada pesan.</div>`;
+  box.scrollTop = box.scrollHeight;
+}
+
+/* ===== Catatan ===== */
+$("#notes-chat-select").addEventListener("change", (e) => loadNotes(e.target.value));
+$("#notes-refresh").addEventListener("click", () => loadNotes($("#notes-chat-select").value));
+
+async function loadNotes(chatJid) {
+  const notes = await api("/api/notes" + (chatJid ? "?chat=" + encodeURIComponent(chatJid) : ""));
+  const grid = $("#notes-grid");
+  if (!notes.length) {
+    grid.innerHTML = `<div class="empty" style="grid-column:1/-1;">Belum ada catatan tersimpan. 📭</div>`;
+    return;
+  }
+  grid.innerHTML = notes
+    .map((n) => {
+      const isLink = n.kind === "link";
+      return (
+        `<div class="note-card kind-${esc(n.kind)}">` +
+        `<div class="note-head"><span class="kind-badge ${isLink ? "link" : ""}">${isLink ? "🔗 link" : "📝 " + esc(n.kind)}</span>` +
+        `<button class="del-note" data-delnote="${n.id}" title="Hapus catatan">✕</button></div>` +
+        `<div class="note-content">${linkify(esc(n.content))}</div>` +
+        `<div class="note-foot"><span class="note-time">${fmtFull(n.created_at)}</span>` +
+        `<span class="note-chat" title="${esc(chatName(n.chat_jid))}">${esc(chatName(n.chat_jid))}</span></div>` +
+        `</div>`
+      );
+    })
+    .join("");
+  grid.querySelectorAll("[data-delnote]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      await fetch("/api/notes/" + btn.dataset.delnote, { method: "DELETE" });
+      loadNotes($("#notes-chat-select").value);
+    });
+  });
+}
+
+/* ===== Whitelist ===== */
+async function refreshWhitelist() {
+  const list = await api("/api/whitelist");
+  $("#wl-table").innerHTML = list.length
+    ? list
+        .map(
+          (w) =>
+            `<tr><td>${esc(w.number)}</td><td>${esc(w.label || "")}</td>` +
+            `<td style="text-align:right;"><button class="btn ghost" data-del="${esc(w.number)}">Hapus</button></td></tr>`
+        )
+        .join("")
+    : `<tr><td colspan="3" class="empty">Whitelist kosong.</td></tr>`;
+  document.querySelectorAll("[data-del]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      await fetch("/api/whitelist/" + btn.dataset.del, { method: "DELETE" });
+      refreshWhitelist();
+    });
+  });
+}
+
+$("#wl-add").addEventListener("click", async () => {
+  const number = $("#wl-number").value.trim();
+  const label = $("#wl-label").value.trim();
+  if (!number) return;
+  await fetch("/api/whitelist", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ number, label }),
+  });
+  $("#wl-number").value = "";
+  $("#wl-label").value = "";
+  refreshWhitelist();
+});
+
+/* ===== People ===== */
+async function refreshPeople() {
+  const contacts = await api("/api/contacts");
+  const sel = $("#person-select");
+  sel.innerHTML = contacts
+    .map((c) => `<option value="${esc(c.number)}">${esc(c.display_name || c.number)} · ${esc(c.number)}</option>`)
+    .join("");
+  if (contacts.length) loadPerson(contacts[0].number);
+  else $("#person-facts").innerHTML = `<div class="empty">Belum ada kontak tercatat.</div>`;
+}
+
+$("#person-select").addEventListener("change", (e) => loadPerson(e.target.value));
+
+async function loadPerson(number) {
+  const facts = await api("/api/facts?person=" + encodeURIComponent(number));
+  $("#person-facts").innerHTML = facts.length
+    ? "<table><tbody>" +
+      facts
+        .map(
+          (f) =>
+            `<tr><td style="width:32%;"><b>${esc(f.key)}</b></td><td>${esc(f.value)}</td>` +
+            `<td style="text-align:right;"><button class="btn ghost" data-delfact="${esc(f.key)}">Hapus</button></td></tr>`
+        )
+        .join("") +
+      "</tbody></table>"
+    : `<div class="empty">Belum ada fakta tersimpan buat orang ini.</div>`;
+  document.querySelectorAll("[data-delfact]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      await fetch(`/api/facts/${encodeURIComponent(number)}/${encodeURIComponent(btn.dataset.delfact)}`, { method: "DELETE" });
+      loadPerson(number);
+    });
+  });
+}
+
+/* ===== Usage ===== */
+async function refreshUsage() {
+  const u = await api("/api/usage");
+  const t = u.totals || {};
+  $("#usage-totals").innerHTML =
+    `<div class="chip"><span class="n">${(t.calls || 0).toLocaleString("id-ID")}</span><span class="l">total calls</span></div>` +
+    `<div class="chip"><span class="n">${(t.total_tokens || 0).toLocaleString("id-ID")}</span><span class="l">total tokens</span></div>` +
+    `<div class="chip"><span class="n">${(t.prompt_tokens || 0).toLocaleString("id-ID")}</span><span class="l">prompt</span></div>` +
+    `<div class="chip"><span class="n">${(t.completion_tokens || 0).toLocaleString("id-ID")}</span><span class="l">completion</span></div>` +
+    `<div class="chip"><span class="n">${t.prompt_tokens ? Math.round((100 * (t.cache_hit_tokens || 0)) / t.prompt_tokens) + "%" : "-"}</span><span class="l">cache hit 💸</span></div>`;
+  $("#usage-by-purpose").innerHTML = (u.byPurpose || [])
+    .sort((a, b) => b.total_tokens - a.total_tokens)
+    .map((p) => `<tr><td>${esc(p.purpose)}</td><td>${p.calls}</td><td>${(p.total_tokens || 0).toLocaleString("id-ID")}</td></tr>`)
+    .join("");
+}
+
+/* ===== Google ===== */
+async function refreshGoogle() {
+  const s = await api("/api/google/status");
+  const el = $("#gcal-status");
+  if (!s.configured) {
+    el.innerHTML = `<p class="hint">GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET belum diisi di .env.</p>`;
+    return;
+  }
+  if (s.connected) {
+    el.innerHTML =
+      `<p>✅ Terhubung sebagai <b>${esc(s.email)}</b></p>` +
+      `<button class="btn ghost" id="gcal-disconnect">Disconnect</button>`;
+    $("#gcal-disconnect").addEventListener("click", async () => {
+      await fetch("/api/google/disconnect", { method: "POST" });
+      refreshGoogle();
+    });
+  } else {
+    el.innerHTML = `<button class="btn primary" id="gcal-connect">Connect Google</button>`;
+    $("#gcal-connect").addEventListener("click", async () => {
+      const { url } = await api("/api/google/auth-url");
+      window.location.href = url;
+    });
+  }
+}
+
+function refreshAll() {
+  refreshStatus();
+  refreshUsage();
+  refreshWhitelist();
+  refreshChats();
+  refreshPeople();
+  refreshGoogle();
+}
+
+setInterval(() => {
+  if (!$("#app-view").classList.contains("hidden")) refreshStatus();
+}, 3000);
+
+(async function init() {
+  const me = await fetch("/api/me").then((r) => r.json());
+  if (me.authed) showApp();
+  else showLogin();
+})();
+</script>
+</body>
+</html>
