@@ -335,6 +335,11 @@ export async function answerQuestion(history, facts = [], senderName = "", notes
       "foto di pesan/reply jadi sticker WA -> make_sticker; " +
       "Kalau ada tool get_server_status (hanya muncul untuk owner): dipakai saat owner tanya kondisi " +
       "server/VPS (uptime, RAM, disk, status bot). " +
+      "Kalau ada tool run_shell_command (hanya untuk owner di DM): dipakai kalau owner minta melakukan sesuatu " +
+      "di server (cek/edit file, kelola service, install, baca log, dll). Susun perintah shell lengkapnya " +
+      "sendiri (boleh sudo). PENTING: tool ini cuma MENYIAPKAN perintah, TIDAK langsung menjalankan — setelah " +
+      "memanggilnya, tampilkan perintah persisnya ke owner dan minta konfirmasi 'ya'; sistem yang akan " +
+      "menjalankan setelah owner mengetik 'ya'. Jangan bilang perintah sudah jalan padahal belum. " +
       "Kalau tool sudah mengirim sesuatu sendiri (tag_all_members, create_poll, make_sticker), cukup konfirmasi singkat. " +
       "Kalau ada tool manage_whitelist (hanya muncul untuk owner): dipakai untuk menambah/menghapus/melihat " +
       "nomor yang boleh chat dengan kamu."

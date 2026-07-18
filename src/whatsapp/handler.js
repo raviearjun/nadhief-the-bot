@@ -25,6 +25,13 @@ import { buildSkills } from "../skills/index.js";
 import { isGoogleConnected } from "../google.js";
 import { getSocket } from "./connection.js";
 import { isSomeoneTyping } from "./typing.js";
+import {
+  getPendingCommand,
+  clearPendingCommand,
+  isConfirmation,
+  isCancellation,
+  executeCommand,
+} from "../skills/shell.js";
 import { toWhatsAppFormat } from "../format.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -47,6 +54,21 @@ function withTimeout(promise, ms, label) {
     promise,
     new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)),
   ]);
+}
+
+// Send with one retry against the current (possibly reconnected) socket.
+async function sendWithRetry(chatJid, text, quoted) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const sock = getSocket();
+      await withTimeout(sock.sendMessage(chatJid, { text }, { quoted }), 15_000, "sendMessage");
+      return;
+    } catch (sendErr) {
+      if (attempt >= 2) throw sendErr;
+      console.warn("[handler] sendMessage failed, retrying on current socket:", sendErr.message);
+      await new Promise((r) => setTimeout(r, 3_000));
+    }
+  }
 }
 
 function parseDurationSpec(spec) {
@@ -376,6 +398,38 @@ export function createMessageHandler({ waState }) {
     }
 
     if (!shouldReply) return;
+
+    // Owner shell confirmation (DM only): if a command is staged and the
+    // owner's message is a deterministic yes, run it now — the model is never
+    // in this decision, so it can't self-confirm a hallucinated command.
+    const isOwnerDM = !isGroup && senderNumber === normalizeNumber(config.ownerNumber);
+    if (isOwnerDM) {
+      const staged = getPendingCommand(senderNumber);
+      if (staged) {
+        if (isConfirmation(text)) {
+          clearPendingCommand(senderNumber);
+          sock.readMessages([m.key]).catch(() => {});
+          console.log(`[shell] executing (owner-confirmed): ${staged}`);
+          const result = await executeCommand(staged);
+          const header = result.ok ? "✅ Selesai" : `⚠️ Gagal (${result.code}${result.timedOut ? ", timeout" : ""})`;
+          const reply = `${header}:\n\`\`\`\n${result.output}\n\`\`\``;
+          await sendWithRetry(chatJid, reply, m).catch((err) =>
+            console.error("[shell] failed to send output:", err.message)
+          );
+          insertMessage({
+            chat_jid: chatJid, chat_name: senderName, sender_jid: waState.ownJid || "bot",
+            sender_name: config.botTriggerName, is_group: 0, text: reply, is_from_me: 1, created_at: Date.now(),
+          });
+          return;
+        }
+        if (isCancellation(text)) {
+          clearPendingCommand(senderNumber);
+          // fall through to a normal reply (John will acknowledge the cancel)
+        }
+        // anything else: leave it staged (owner might be clarifying) and
+        // answer normally.
+      }
+    }
 
     const query = isGroup ? stripTrigger(text) : text;
     if (!query && !(imageInfo && config.llmVisionModel)) return;

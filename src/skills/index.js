@@ -29,8 +29,9 @@ import * as github from "./github.js";
 import * as music from "./music.js";
 import * as server from "./server.js";
 import * as sticker from "./sticker.js";
+import * as shell from "./shell.js";
 
-const MODULES = [search, calculator, weather, prayer, currency, reminders, todos, notes, summary, group, calendar, docs, drive, bioskop, whitelist, gmail, sheets, youtube, github, music, server, sticker];
+const MODULES = [search, calculator, weather, prayer, currency, reminders, todos, notes, summary, group, calendar, docs, drive, bioskop, whitelist, gmail, sheets, youtube, github, music, server, sticker, shell];
 
 export function buildSkills(ctx) {
   return MODULES.flatMap((m) => m.skills(ctx));
