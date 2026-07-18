@@ -180,17 +180,27 @@ export async function summarizeMessages(messages, { label = "chat" } = {}) {
  * conversation history window reaches.
  * senderName: WhatsApp display name of whoever sent the current message —
  * needed so the model doesn't confuse its own name with the human's.
+ *
+ * Group chats have multiple humans in the same history window, but the
+ * OpenAI "user" role has no per-message name field — without a name prefix
+ * every non-bot turn looks like it came from the same person, which is how
+ * the bot ends up replying to the wrong person or mixing two people up
+ * mid-conversation. Prefixing each turn with its actual sender fixes that;
+ * harmless no-op in a 1:1 DM where there's only ever one sender anyway.
  */
 // Very long individual messages (pasted articles, long bot replies) bloat
 // every subsequent request's history — clip them, the gist survives.
 const MAX_HISTORY_MSG_CHARS = 800;
 
 export async function answerQuestion(history, facts = [], senderName = "", notes = [], skills = []) {
-  const turns = history.map((h) => ({
-    role: h.is_from_me ? "assistant" : "user",
-    content:
-      h.text.length > MAX_HISTORY_MSG_CHARS ? h.text.slice(0, MAX_HISTORY_MSG_CHARS) + " [...dipotong]" : h.text,
-  }));
+  const turns = history.map((h) => {
+    const clipped =
+      h.text.length > MAX_HISTORY_MSG_CHARS ? h.text.slice(0, MAX_HISTORY_MSG_CHARS) + " [...dipotong]" : h.text;
+    return {
+      role: h.is_from_me ? "assistant" : "user",
+      content: h.is_from_me ? clipped : `${h.sender_name || h.sender_number}: ${clipped}`,
+    };
+  });
 
   const factsBlock = facts.length
     ? `\n\nFakta yang kamu tahu tentang ${senderName || "orang ini"} (dari percakapan sebelumnya):\n${facts
@@ -252,6 +262,11 @@ export async function answerQuestion(history, facts = [], senderName = "", notes
     "mengingat apa yang sudah dibahas, jangan bilang kamu tidak punya memori. " +
     "Jangan pernah tertukar antara nama kamu sendiri dan nama lawan bicara — " +
     `jika lawan bicara menyapa dengan nama "${config.botDisplayName}", itu memanggil KAMU, bukan diri mereka sendiri. ` +
+    "Di riwayat chat grup, tiap pesan user diberi label 'Nama: isi pesan' — pakai itu untuk tahu SIAPA yang " +
+    "sedang bicara ke kamu SEKARANG (lihat juga 'Lawan bicara saat ini' di bawah) dan siapa yang cuma DIBAHAS " +
+    "atau disebut namanya di pesan itu. Sapa/pakai 'kamu' HANYA untuk orang yang sedang bicara ke kamu saat ini " +
+    "— orang lain yang disebut namanya (baik di pesan sekarang maupun riwayat sebelumnya) selalu disebut pakai " +
+    "namanya (orang ketiga), jangan disamakan atau ditukar dengan lawan bicara saat ini. " +
     "PENTING soal format teks: ini dikirim ke WhatsApp, BUKAN markdown biasa. " +
     "Bold pakai *satu bintang* (jangan **dua bintang**), italic pakai _garis bawah_, " +
     "jangan pakai heading (#) atau tabel markdown. " +
