@@ -371,6 +371,8 @@ export async function answerQuestion(history, facts = [], senderName = "", notes
     "PENTING soal format teks: ini dikirim ke WhatsApp, BUKAN markdown biasa. " +
     "Bold pakai *satu bintang* (jangan **dua bintang**), italic pakai _garis bawah_, " +
     "jangan pakai heading (#) atau tabel markdown. " +
+    "Kalau pesan-pesan kamu yang lama di riwayat melanggar aturan gaya di atas (kepanjangan, " +
+    "bold di mana-mana, emoji banyak), JANGAN ditiru — aturan di atas yang menang. " +
     skillsNote;
 
   const dynamicTail =

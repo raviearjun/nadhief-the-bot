@@ -9,6 +9,7 @@ import QRCode from "qrcode";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { rm } from "node:fs/promises";
+import { notePresenceUpdate } from "./typing.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const AUTH_DIR = path.join(__dirname, "..", "..", "auth_info");
@@ -103,6 +104,12 @@ export async function startWhatsApp(onMessage) {
       console.log(`[wa] reconnecting in ${delay}ms (attempt ${reconnectAttempts})`);
       setTimeout(() => startWhatsApp(onMessage), delay);
     }
+  });
+
+  sock.ev.on("presence.update", (update) => {
+    try {
+      notePresenceUpdate(update);
+    } catch {}
   });
 
   sock.ev.on("messages.upsert", async ({ messages, type }) => {

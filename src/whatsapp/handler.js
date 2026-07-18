@@ -24,6 +24,7 @@ import { summarizeMessages, answerQuestion, analyzeMessage, extractLinks, descri
 import { buildSkills } from "../skills/index.js";
 import { isGoogleConnected } from "../google.js";
 import { getSocket } from "./connection.js";
+import { isSomeoneTyping } from "./typing.js";
 import { toWhatsAppFormat } from "../format.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -31,6 +32,12 @@ const REMINDER_CMD_RE = /^\/remind\s+(\d+[smh]|\d{1,2}:\d{2})\s+(.+)$/i;
 // Minimum gap between uninvited group interjections — the difference between
 // "helpful" and "sok asik".
 const UNSOLICITED_COOLDOWN_MS = 10 * 60_000;
+
+// Reply-queue tuning (see the queue section in createMessageHandler).
+const GROUP_DEBOUNCE_MS = 5_000;
+const DM_DEBOUNCE_MS = 1_500;
+const TYPING_WAIT_STEP_MS = 1_500;
+const TYPING_WAIT_MAX_MS = 15_000;
 
 // sock.sendMessage() to a group can internally hang fetching group metadata
 // (seen on this server's flaky network) without ever resolving OR rejecting —
@@ -128,32 +135,49 @@ function startTyping(getSock, chatJid) {
   };
 }
 
+// Proactive-mode controls, regex-based so they always work even when the LLM
+// is having a bad day. Handled directly in onMessage (bypassing the reply
+// queue) so "John diem!" applies instantly and can't be displaced by a
+// newer message in a burst. Returns the confirmation text, or null.
+function groupModeCommand(lower, chatJid) {
+  // Short imperative only ("diem dulu", "stop john", "diem sampe besok") —
+  // a longer sentence containing the word ("kok diem aja sih?") is
+  // conversation, not a command.
+  if (
+    lower.length <= 30 &&
+    /(^|\s)(diem|diam|kalem|stop)\b/.test(lower) &&
+    !/\b(kok|kenapa|knp|jangan|nggak|gak|ga)\b/.test(lower)
+  ) {
+    let ms = 60 * 60_000;
+    let label = "sejam";
+    const dur = lower.match(/(\d+)\s*(jam|menit)/);
+    if (dur) {
+      ms = Number(dur[1]) * (dur[2] === "jam" ? 3_600_000 : 60_000);
+      label = `${dur[1]} ${dur[2]}`;
+    } else if (/\b(sampe|sampai)\s*(besok|pagi)\b/.test(lower)) {
+      const t = new Date();
+      t.setDate(t.getDate() + 1);
+      t.setHours(7, 0, 0, 0);
+      ms = t.getTime() - Date.now();
+      label = "sampai besok pagi";
+    }
+    updateChatSettings(chatJid, { muted_until: Date.now() + ms });
+    return `Siap, John kalem dulu ${label} 🤐 Panggil nama John atau reply pesan John kalau butuh.`;
+  }
+  if (/\bpasif\b/.test(lower)) {
+    updateChatSettings(chatJid, { proactive: 0 });
+    return "Oke, mode pasif: John cuma jawab kalau dipanggil atau di-reply di grup ini. 🫡";
+  }
+  if (/\b(proaktif|bangun|aktif lagi)\b/.test(lower)) {
+    updateChatSettings(chatJid, { proactive: 1, muted_until: 0 });
+    return "John aktif lagi! 😎 Siap nimbrung kalau ada yang bisa dibantu.";
+  }
+  return null;
+}
+
 async function routeCommand(query, ctx) {
   const { chatJid, senderName, senderNumber, isGroup } = ctx;
   const lower = query.toLowerCase();
-
-  // Proactive-mode controls, regex-based so they always work even when the
-  // LLM is having a bad day. Scoped per group chat.
-  if (isGroup) {
-    // Short imperative only ("diem dulu", "kalem dong") — a longer sentence
-    // containing the word ("kok diem aja sih?") is conversation, not a command.
-    if (
-      lower.length <= 25 &&
-      /(^|\s)(diem|diam|kalem)\b/.test(lower) &&
-      !/\b(kok|kenapa|knp|jangan|nggak|gak|ga)\b/.test(lower)
-    ) {
-      updateChatSettings(chatJid, { muted_until: Date.now() + 60 * 60_000 });
-      return "Siap, John kalem dulu sejam 🤐 Kalau butuh, panggil nama John atau reply pesan John aja.";
-    }
-    if (/\bpasif\b/.test(lower)) {
-      updateChatSettings(chatJid, { proactive: 0 });
-      return "Oke, mode pasif: John cuma jawab kalau dipanggil atau di-reply di grup ini. 🫡";
-    }
-    if (/\b(proaktif|bangun|aktif lagi)\b/.test(lower)) {
-      updateChatSettings(chatJid, { proactive: 1, muted_until: 0 });
-      return "John aktif lagi! 😎 Siap nimbrung kalau ada yang bisa dibantu.";
-    }
-  }
 
   // Fast-path slash commands stay regex-based for reliability; everything
   // else goes to the LLM, which picks the right skill(s) itself.
@@ -212,6 +236,11 @@ async function routeCommand(query, ctx) {
 }
 
 export function createMessageHandler({ waState }) {
+  // Per-chat reply queue state, and which groups we've presence-subscribed
+  // (needed for WhatsApp to send us their typing updates).
+  const replyQueues = new Map();
+  const presenceSubscribed = new Set();
+
   return async function onMessage(sock, m) {
     if (m.key.fromMe) return;
 
@@ -287,11 +316,16 @@ export function createMessageHandler({ waState }) {
       }
     }
 
-    // Tier-0 triggers, cheapest first: explicit mention/trigger word, a
-    // swipe-reply to one of the bot's own messages, or a follow-up moments
-    // after the bot spoke by someone who was in that exchange.
-    const triggered =
-      isGroup && (isMentioned(m, waState) || isReplyToBot(m, waState) || isRecentExchange(chatJid, senderNumber));
+    // Explicit triggers (mention, trigger word, swipe-reply to the bot)
+    // always work — that's what the mute confirmation promises. Ambient
+    // triggers (continuation window, proactive join) are exactly what
+    // "john diem" / "john pasif" exist to switch off, so they're gated:
+    // previously the mute confirmation itself restarted the continuation
+    // window and John kept "peeking out from under the table" forever.
+    const settings = isGroup ? getChatSettings(chatJid) : null;
+    const explicit = isGroup && (isMentioned(m, waState) || isReplyToBot(m, waState));
+    const ambientAllowed = isGroup && settings.proactive === 1 && settings.muted_until < Date.now();
+    const triggered = explicit || (ambientAllowed && isRecentExchange(chatJid, senderNumber));
     let shouldReply = whitelisted && (isGroup ? triggered : true);
     let proactive = false;
 
@@ -301,12 +335,10 @@ export function createMessageHandler({ waState }) {
       // regardless (notes + facts), so it costs no extra LLM call — just a
       // slightly bigger prompt. Guardrails: per-chat toggle, mute window,
       // and a cooldown between uninvited interjections.
-      const settings = isGroup ? getChatSettings(chatJid) : null;
       const canConsiderJoin =
         isGroup &&
         !shouldReply &&
-        settings.proactive === 1 &&
-        settings.muted_until < Date.now() &&
+        ambientAllowed &&
         Date.now() - settings.last_unsolicited_at > UNSOLICITED_COOLDOWN_MS;
 
       if (canConsiderJoin) {
@@ -345,8 +377,102 @@ export function createMessageHandler({ waState }) {
 
     if (!shouldReply) return;
 
-    let query = isGroup ? stripTrigger(text) : text;
+    const query = isGroup ? stripTrigger(text) : text;
     if (!query && !(imageInfo && config.llmVisionModel)) return;
+
+    // Mode commands apply immediately, skipping the queue — a queued mute
+    // could be displaced by the next message in a burst and never land.
+    if (isGroup && explicit) {
+      const confirmation = groupModeCommand(query.toLowerCase(), chatJid);
+      if (confirmation) {
+        const q = replyQueues.get(chatJid);
+        if (q) q.job = null; // drop any queued ambient reply — we were just told to hush
+        getSocket()
+          ?.sendMessage(chatJid, { text: confirmation }, { quoted: m })
+          .catch((err) => console.error("[handler] mode confirmation send failed:", err.message));
+        insertMessage({
+          chat_jid: chatJid,
+          chat_name: m.key.remoteJid,
+          sender_jid: waState.ownJid || "bot",
+          sender_name: config.botTriggerName,
+          is_group: 1,
+          text: confirmation,
+          is_from_me: 1,
+          created_at: Date.now(),
+        });
+        return;
+      }
+    }
+
+    // Subscribe once per group so WhatsApp starts sending us typing
+    // (presence) updates for it — best-effort, used by the reply queue.
+    if (isGroup && !presenceSubscribed.has(chatJid)) {
+      presenceSubscribed.add(chatJid);
+      Promise.resolve(sock.presenceSubscribe?.(chatJid)).catch(() => {});
+    }
+
+    // Mark as read right away; the actual reply goes through the per-chat
+    // queue below (debounced, typing-aware, one generation at a time).
+    sock.readMessages([m.key]).catch(() => {});
+    scheduleReply({ sock, m, chatJid, senderName, senderNumber, isGroup, explicit, query, text, imageInfo, messageId });
+  };
+
+  // ---- Per-chat reply queue ----------------------------------------------
+  // People text in bursts ("lanjut kerja ya" / "hehe makasii" / "byee" within
+  // seconds) and John used to answer every single one, sometimes with two
+  // generations racing in parallel. Instead: debounce a few seconds so the
+  // burst settles (newest message wins — history carries the rest), hold on
+  // while someone is visibly typing, and never run more than one reply
+  // generation per chat at a time. (Function declarations hoist above the
+  // return, so onMessage can call these.)
+  function scheduleReply(job) {
+    let q = replyQueues.get(job.chatJid);
+    if (!q) replyQueues.set(job.chatJid, (q = { job: null, timer: null, running: false }));
+    q.job = job;
+    if (q.timer) clearTimeout(q.timer);
+    q.timer = setTimeout(
+      () => {
+        q.timer = null;
+        runReplyQueue(job.chatJid).catch((err) => console.error("[handler] reply queue error:", err));
+      },
+      job.isGroup ? GROUP_DEBOUNCE_MS : DM_DEBOUNCE_MS
+    );
+  }
+
+  async function runReplyQueue(chatJid) {
+    const q = replyQueues.get(chatJid);
+    if (!q || q.running) return;
+    q.running = true;
+    try {
+      while (q.job) {
+        // Let an active typer finish — their message may change the answer
+        // (and would otherwise trigger yet another reply right after ours).
+        if (q.job.isGroup) {
+          const start = Date.now();
+          while (isSomeoneTyping(chatJid) && Date.now() - start < TYPING_WAIT_MAX_MS) {
+            await new Promise((r) => setTimeout(r, TYPING_WAIT_STEP_MS));
+          }
+        }
+        const job = q.job;
+        q.job = null;
+        await generateAndSendReply(job);
+      }
+    } finally {
+      q.running = false;
+    }
+  }
+
+  async function generateAndSendReply(job) {
+    const { sock, m, chatJid, senderName, senderNumber, isGroup, explicit, text, imageInfo, messageId } = job;
+    let query = job.query;
+
+    // Conditions may have changed during the debounce ("john diem" arriving
+    // right behind the message we were about to answer) — re-check before
+    // speaking unless the message addressed John explicitly.
+    if (isGroup && !explicit) {
+      const settings = getChatSettings(chatJid);
+      if (settings.proactive !== 1 || settings.muted_until > Date.now()) return;
+    }
 
     // In a DM, also pull in notes from any group chats this person is part of —
     // otherwise "jadwal kita" discussed in the group looks invisible when the
@@ -369,9 +495,6 @@ export function createMessageHandler({ waState }) {
       },
     };
 
-    // Mark as read + show typing so the sender can tell the bot is working
-    // on it instead of staring at an unread, silent chat.
-    sock.readMessages([m.key]).catch(() => {});
     const stopTyping = startTyping(live, chatJid);
 
     try {
@@ -453,5 +576,5 @@ export function createMessageHandler({ waState }) {
     } finally {
       stopTyping();
     }
-  };
+  }
 }
