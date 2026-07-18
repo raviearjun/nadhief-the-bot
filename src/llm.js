@@ -325,6 +325,9 @@ export async function answerQuestion(history, facts = [], senderName = "", notes
       "baru. File baru HANYA kalau user eksplisit minta file terpisah atau topiknya beda sama sekali. " +
       "Satu permintaan = MAKSIMAL satu file baru. " +
       "cari video -> search_youtube; " +
+      "lirik lagu -> get_song_lyrics (WAJIB — lirik dari ingatanmu hampir pasti salah, JANGAN PERNAH menulis " +
+      "lirik tanpa tool ini; kalau tidak ketemu, bilang jujur tidak nemu); info lagu (album/tahun/genre/" +
+      "preview) -> get_song_info; " +
       "GitHub: daftar repo -> list_github_repos, cek PR/issue/commit -> get_repo_activity (ada param branch), " +
       "daftar branch -> list_branches, bandingkan dua branch (commit & file berubah) -> compare_branches, " +
       "baca file/folder repo -> read_github_file (ada param ref untuk branch), " +
