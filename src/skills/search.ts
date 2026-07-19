@@ -20,7 +20,7 @@ async function tavilySearch(query) {
 
   if (!res.ok) return { error: `search failed with status ${res.status}` };
 
-  const data = await res.json();
+  const data = await res.json() as any;
   return {
     answer: data.answer ?? null,
     results: (data.results ?? []).map((r) => ({ title: r.title, url: r.url, content: r.content })),

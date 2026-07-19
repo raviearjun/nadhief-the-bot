@@ -7,7 +7,8 @@
     "node": ">=20"
   },
   "scripts": {
-    "start": "node src/index.js"
+    "start": "node --import tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@hapi/boom": "^10.0.1",
@@ -20,6 +21,11 @@
     "node-cron": "^3.0.3",
     "pino": "^9.4.0",
     "qrcode": "^1.5.4",
-    "sharp": "^0.35.3"
+    "sharp": "^0.35.3",
+    "tsx": "^4.23.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "typescript": "^7.0.2"
   }
 }

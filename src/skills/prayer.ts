@@ -7,7 +7,7 @@ async function getPrayerTimes(city, country) {
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!res.ok) return { error: `prayer times fetch failed with status ${res.status}` };
-  const data = await res.json();
+  const data = await res.json() as any;
   const t = data.data?.timings;
   if (!t) return { error: "no prayer times returned for that city" };
 

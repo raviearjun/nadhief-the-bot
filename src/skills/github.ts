@@ -4,7 +4,7 @@ const API = "https://api.github.com";
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_FILE_CHARS = 6000;
 
-async function gh(path, opts = {}) {
+async function gh(path, opts: any = {}) {
   const res = await fetch(API + path, {
     ...opts,
     headers: {
@@ -20,7 +20,7 @@ async function gh(path, opts = {}) {
     const body = await res.text().catch(() => "");
     throw new Error(`GitHub API ${res.status}: ${body.slice(0, 200)}`);
   }
-  return res.json();
+  return res.json() as any;
 }
 
 // "wabot" -> "reva/wabot" using the token owner's login; "org/repo" passes through.

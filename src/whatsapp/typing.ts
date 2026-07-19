@@ -13,7 +13,7 @@ export function notePresenceUpdate(update) {
   let chat = composing.get(id);
   if (!chat) composing.set(id, (chat = new Map()));
   for (const [jid, p] of Object.entries(presences)) {
-    const state = p?.lastKnownPresence;
+    const state = (p as any)?.lastKnownPresence;
     if (state === "composing" || state === "recording") chat.set(jid, Date.now());
     else chat.delete(jid);
   }

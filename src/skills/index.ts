@@ -32,7 +32,7 @@ import * as sticker from "./sticker.js";
 import * as shell from "./shell.js";
 import * as webapp from "./webapp.js";
 
-const MODULES = [search, calculator, weather, prayer, currency, reminders, todos, notes, summary, group, calendar, docs, drive, bioskop, whitelist, gmail, sheets, youtube, github, music, server, sticker, shell, webapp];
+const MODULES: any[] = [search, calculator, weather, prayer, currency, reminders, todos, notes, summary, group, calendar, docs, drive, bioskop, whitelist, gmail, sheets, youtube, github, music, server, sticker, shell, webapp];
 
 export function buildSkills(ctx) {
   return MODULES.flatMap((m) => m.skills(ctx));

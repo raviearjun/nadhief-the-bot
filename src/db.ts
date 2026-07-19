@@ -182,7 +182,7 @@ export function updateMessageText(id, text) {
   db.prepare(`UPDATE messages SET text = ? WHERE id = ?`).run(text, id);
 }
 
-export function getRecentMessages(chatJid, sinceTs, limit = 200) {
+export function getRecentMessages(chatJid, sinceTs, limit = 200): any[] {
   return db
     .prepare(
       `SELECT * FROM messages WHERE chat_jid = ? AND created_at >= ? ORDER BY created_at ASC LIMIT ?`
@@ -190,14 +190,14 @@ export function getRecentMessages(chatJid, sinceTs, limit = 200) {
     .all(chatJid, sinceTs, limit);
 }
 
-export function getRecentHistory(chatJid, limit = 20) {
+export function getRecentHistory(chatJid, limit = 20): any[] {
   const rows = db
     .prepare(`SELECT * FROM messages WHERE chat_jid = ? ORDER BY created_at DESC LIMIT ?`)
     .all(chatJid, limit);
   return rows.reverse(); // chronological order for feeding to the LLM
 }
 
-export function getAllChatsSince(sinceTs) {
+export function getAllChatsSince(sinceTs): any[] {
   return db
     .prepare(
       `SELECT DISTINCT chat_jid, chat_name FROM messages WHERE created_at >= ?`
@@ -364,7 +364,7 @@ export function rescheduleReminder(id, nextFireAt) {
   db.prepare(`UPDATE reminders SET fire_at = ? WHERE id = ?`).run(nextFireAt, id);
 }
 
-export function getDueReminders(now) {
+export function getDueReminders(now): any[] {
   return db
     .prepare(`SELECT * FROM reminders WHERE sent = 0 AND fire_at <= ? ORDER BY fire_at ASC`)
     .all(now);
@@ -423,7 +423,7 @@ export function getGroupsWithSummaryAt(hour, minute) {
     .map((r) => r.chat_jid);
 }
 
-export function getChatSettings(chatJid) {
+export function getChatSettings(chatJid): any {
   return (
     db.prepare(`SELECT * FROM chat_settings WHERE chat_jid = ?`).get(chatJid) ?? {
       chat_jid: chatJid,
@@ -454,7 +454,7 @@ export function updateChatSettings(chatJid, patch) {
  * in right after doesn't count.
  */
 export function isRecentExchange(chatJid, senderNumber, { replyWindowMs = 120_000, participationWindowMs = 300_000 } = {}) {
-  const lastBot = db
+  const lastBot: any = db
     .prepare(`SELECT created_at FROM messages WHERE chat_jid = ? AND is_from_me = 1 ORDER BY created_at DESC LIMIT 1`)
     .get(chatJid);
   if (!lastBot || Date.now() - lastBot.created_at > replyWindowMs) return false;
@@ -489,7 +489,7 @@ export function updateGoogleAccessToken(accessToken, expiryDate) {
   );
 }
 
-export function getGoogleAuth() {
+export function getGoogleAuth(): any {
   return db.prepare(`SELECT * FROM google_auth WHERE id = 1`).get() ?? null;
 }
 

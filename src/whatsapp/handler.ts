@@ -110,7 +110,7 @@ function bareNumber(jid) {
 // imageMessage for photo captions, etc. Scan them all.
 function getContextInfo(m) {
   for (const content of Object.values(m.message ?? {})) {
-    if (content && typeof content === "object" && content.contextInfo) return content.contextInfo;
+    if (content && typeof content === "object" && (content as any).contextInfo) return (content as any).contextInfo;
   }
   return null;
 }

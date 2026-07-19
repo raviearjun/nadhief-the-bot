@@ -1,0 +1,21 @@
+{
+  "//": "Pragmatic first-pass config for the JS->TS migration of the live bot. Types are checked but lenient (no implicit-any errors, nulls loose) so the mechanical rename runs immediately; strictness is meant to be ratcheted up file by file over time.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": false,
+    "strict": false,
+    "noImplicitAny": false,
+    "strictNullChecks": false,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules"]
+}

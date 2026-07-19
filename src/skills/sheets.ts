@@ -98,7 +98,7 @@ async function createSheet(title, headers, rows) {
   return { ok: true, url: res.data.spreadsheetUrl };
 }
 
-async function updateSheet(spreadsheetName, values, { tab, range, clear } = {}) {
+async function updateSheet(spreadsheetName, values, { tab, range, clear }: any = {}) {
   const found = await resolveSpreadsheet(spreadsheetName);
   if (found.error) return found;
   const sheets = google.sheets({ version: "v4", auth: auth() });

@@ -20,10 +20,10 @@ function clip(lyrics) {
   return lyrics.slice(0, MAX_LYRICS_CHARS) + "\n[...lirik dipotong]";
 }
 
-async function fetchJson(url, headers) {
+async function fetchJson(url, headers?) {
   const res = await fetch(url, { headers, signal: AbortSignal.timeout(TIMEOUT_MS) });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  return res.json() as Promise<any>;
 }
 
 async function getLyrics(artist, title) {

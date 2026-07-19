@@ -9,7 +9,7 @@ const LLM_URL = `${config.llmBaseUrl}/chat/completions`;
 // more headroom than a flash model would need.
 const REQUEST_TIMEOUT_MS = 45_000;
 
-async function chat(messages, { purpose, temperature = 0.3 } = {}) {
+async function chat(messages, { purpose, temperature = 0.3 }: any = {}) {
   const res = await fetch(LLM_URL, {
     method: "POST",
     headers: {
@@ -30,7 +30,7 @@ async function chat(messages, { purpose, temperature = 0.3 } = {}) {
     throw new Error(`LLM API error ${res.status}: ${body}`);
   }
 
-  const data = await res.json();
+  const data = await res.json() as any;
   logLlmUsage(purpose ?? "unknown", data.usage);
   return data.choices[0].message.content;
 }
@@ -42,9 +42,9 @@ async function chat(messages, { purpose, temperature = 0.3 } = {}) {
  * execute it -> feed the result back -> model either answers or asks for
  * another tool call.
  */
-async function chatWithTools(messages, { purpose, temperature = 0.3, maxRounds = 4, skills = [] } = {}) {
+async function chatWithTools(messages, { purpose, temperature = 0.3, maxRounds = 4, skills = [] }: any = {}) {
   const tools = skills.length ? skills.map((s) => s.definition) : undefined;
-  const executors = new Map(skills.map((s) => [s.definition.function.name, s.execute]));
+  const executors = new Map<string, any>(skills.map((s) => [s.definition.function.name, s.execute]));
   const msgs = [...messages];
 
   for (let round = 0; round < maxRounds; round++) {
@@ -69,7 +69,7 @@ async function chatWithTools(messages, { purpose, temperature = 0.3, maxRounds =
       throw new Error(`LLM API error ${res.status}: ${body}`);
     }
 
-    const data = await res.json();
+    const data = await res.json() as any;
     logLlmUsage(purpose ?? "unknown", data.usage);
     const message = data.choices[0].message;
 
@@ -138,7 +138,7 @@ export async function describeImage(imageDataUrl, hint = "") {
     throw new Error(`Vision API error ${res.status}: ${body.slice(0, 200)}`);
   }
 
-  const data = await res.json();
+  const data = await res.json() as any;
   logLlmUsage("vision", data.usage);
   return data.choices[0].message.content?.trim() || null;
 }
@@ -157,7 +157,7 @@ export function extractLinks(text) {
  * halves the per-message overhead, and the fully static system prompt makes
  * repeat calls hit DeepSeek's automatic context cache.
  */
-export async function analyzeMessage(text, senderDisplayName, { groupContext } = {}) {
+export async function analyzeMessage(text, senderDisplayName, { groupContext }: any = {}) {
   const none = { note: null, facts: [], join: false, joinReason: "" };
   // Short messages carry no notes/facts, but in a group they can still
   // warrant a join decision ("gimana dong?"), so only skip them when there's

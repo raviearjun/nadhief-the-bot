@@ -18,7 +18,7 @@ async function searchYoutube(query, maxResults) {
     const body = await res.text().catch(() => "");
     return { error: `YouTube API error ${res.status}: ${body.slice(0, 200)}` };
   }
-  const data = await res.json();
+  const data = await res.json() as any;
   return {
     videos: (data.items ?? []).map((v) => ({
       title: v.snippet.title,

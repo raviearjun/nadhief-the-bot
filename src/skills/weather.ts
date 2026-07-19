@@ -35,7 +35,7 @@ async function getWeather(city) {
     { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) }
   );
   if (!geoRes.ok) return { error: `geocoding failed with status ${geoRes.status}` };
-  const geo = await geoRes.json();
+  const geo = await geoRes.json() as any;
   const place = geo.results?.[0];
   if (!place) return { error: `city "${city}" not found` };
 
@@ -51,7 +51,7 @@ async function getWeather(city) {
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!res.ok) return { error: `weather fetch failed with status ${res.status}` };
-  const data = await res.json();
+  const data = await res.json() as any;
 
   return {
     location: `${place.name}${place.admin1 ? ", " + place.admin1 : ""}, ${place.country}`,

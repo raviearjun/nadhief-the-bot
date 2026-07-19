@@ -12,7 +12,7 @@ async function convert(amount, from, to) {
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!res.ok) return { error: `exchange rate fetch failed with status ${res.status}` };
-  const data = await res.json();
+  const data = await res.json() as any;
   if (data.result !== "success") return { error: `unknown base currency ${base}` };
 
   const rate = data.rates?.[target];

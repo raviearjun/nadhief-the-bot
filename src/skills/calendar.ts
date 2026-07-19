@@ -124,7 +124,7 @@ export function skills() {
       },
       execute: async ({ event_id, summary, start, end, description, location }) => {
         try {
-          const requestBody = {};
+          const requestBody: any = {};
           if (summary) requestBody.summary = summary;
           if (description) requestBody.description = description;
           if (location) requestBody.location = location;
