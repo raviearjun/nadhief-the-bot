@@ -165,23 +165,52 @@ confined to `/home/johnbuilder/projects/<slug>`. Built apps are served on
 ports 5100–5199 and exposed at `http://103.150.197.170:<port>` (no nginx/TLS
 for these — they're throwaway/dev previews, not the main dashboard).
 
-**Known gotcha (already hit once, fixed 2026-07-20):** `johnbuilder`'s own
-Claude Code credential store (`/home/johnbuilder/.claude/.credentials.json`)
-does **not** retain a working refresh token, unlike `revaldyas`'s — running
+**Known gotcha #1 (fixed 2026-07-20):** `johnbuilder`'s own Claude Code
+credential store (`/home/johnbuilder/.claude/.credentials.json`) does
+**not** retain a working refresh token, unlike `revaldyas`'s — running
 `claude setup-token` as `johnbuilder` prints a fresh long-lived token but
-does not persist it into a usable session. So `builder.ts` passes the token
-**explicitly** on every invocation via `env CLAUDE_CODE_OAUTH_TOKEN=... `
-(see `withBuilderEnv()` in `builder.ts`), reading it from
-`BUILDER_CLAUDE_OAUTH_TOKEN` in `~/wabot/.env`. If `build_app` starts
-failing with a 401 again, this token has likely expired (1-year validity)
-and needs regenerating:
+does not persist it into a usable session. So the token has to be supplied
+explicitly on every invocation.
+
+**Known gotcha #2 (fixed 2026-07-20, caused a real outage):** the first fix
+for #1 passed the token as a literal `env CLAUDE_CODE_OAUTH_TOKEN=...` argv
+element from `revaldyas`'s process. Two things then leaked it in plaintext
+into `journalctl -u wabot`: sudo's own command-line audit log, and an
+uncaught `spawn` error (Node dumps the full `spawnargs` array on an
+unhandled child-process `error` event). The spawn error itself was a
+separate bug: `spawn("sudo", ..., {cwd: dir})` tried to `chdir` into
+`johnbuilder`'s project dir *as `revaldyas`*, before sudo's setuid — but
+`/home/johnbuilder` is `750` and `revaldyas` isn't in the `johnbuilder`
+group, so it failed `EACCES`, and with no `.on('error', ...)` handler that
+crashed the entire bot process (systemd auto-restarted it after ~5s).
+
+**Current, correct setup:** the token lives in
+`/home/johnbuilder/.claude_oauth_token` (chmod `600`, owned by
+`johnbuilder` — unreadable by `revaldyas`), and `spawnClaudeAsBuilder()` in
+`builder.ts` does the `cd` and the token-file read *inside* a `bash -c`
+script that only runs after sudo's setuid to `johnbuilder`. The token never
+appears in `revaldyas`'s process env, argv, or any log. `spawnAsBuilder()`
+also has an `.on('error', ...)` handler now so a future spawn failure logs
+and fails gracefully instead of taking down the whole bot.
+
+If `build_app` starts failing with a 401 again, the token (1-year validity)
+needs regenerating:
 
 ```bash
 sudo -u johnbuilder -H script -qc '/opt/claude-code/claude setup-token' /tmp/x.txt
 # complete the browser OAuth flow, paste the code back into the terminal,
-# copy the final printed sk-ant-oat01-... token, then:
-rm -f /tmp/x.txt   # (may need `sudo rm -f`, since the transcript is owned by johnbuilder)
+# then, using the freshly printed token:
+TOKEN='paste-the-fresh-token-here'
+echo "$TOKEN" | sudo -u johnbuilder tee /home/johnbuilder/.claude_oauth_token > /dev/null
+sudo chmod 600 /home/johnbuilder/.claude_oauth_token
+sudo chown johnbuilder:johnbuilder /home/johnbuilder/.claude_oauth_token
+sudo rm -f /tmp/x.txt
 ```
+
+**Never** put this token in `~/wabot/.env` or pass it via `env VAR=val` in
+any command `revaldyas` runs directly — that's exactly what leaked it last
+time. It must only ever be read by a process already running as
+`johnbuilder`.
 
 Then update `BUILDER_CLAUDE_OAUTH_TOKEN` in `~/wabot/.env` and `sudo
 systemctl restart wabot`. `webapp.ts`'s skills disable themselves entirely
