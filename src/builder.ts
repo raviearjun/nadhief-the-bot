@@ -2,7 +2,6 @@ import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { getSocket } from "./whatsapp/connection.js";
 import { toWhatsAppFormat } from "./format.js";
-import { config } from "./config.js";
 
 const execFileP = promisify(execFile);
 
@@ -47,24 +46,42 @@ function allocatePort(slug) {
 }
 
 // johnbuilder's own credential store never keeps a working refresh token, so
-// every invocation gets the long-lived Claude Code OAuth token set fresh via
-// `env` (running as johnbuilder itself — sudo's env_reset would otherwise
-// strip anything passed through the parent's environment).
-function withBuilderEnv(args) {
-  return config.builderClaudeToken
-    ? ["env", `CLAUDE_CODE_OAUTH_TOKEN=${config.builderClaudeToken}`, ...args]
-    : args;
-}
+// Claude Code needs its long-lived OAuth token set explicitly. It's kept in
+// ~/.claude_oauth_token *inside johnbuilder's own home* (chmod 600, owned by
+// johnbuilder) rather than passed through revaldyas's process env/argv:
+// sudo logs the full command line of anything it runs, and an uncaught spawn
+// error dumps the whole argv array — both would otherwise leak the token in
+// plaintext (this happened once; see DEPLOYMENT.md). Reading the file
+// happens inside spawnClaudeAsBuilder, after sudo's setuid to johnbuilder.
 
 // Run a command AS johnbuilder — privilege drop via sudo (the bot's user has
 // NOPASSWD sudo; johnbuilder itself has none). No shell: argv is passed
 // literally, so user text in the prompt can't inject commands.
 function asBuilder(args, opts = {}) {
-  return execFileP("sudo", ["-u", BUILDER_USER, "-H", "--", ...withBuilderEnv(args)], opts);
+  return execFileP("sudo", ["-u", BUILDER_USER, "-H", "--", ...args], opts);
 }
 
 function spawnAsBuilder(args, opts = {}) {
-  return spawn("sudo", ["-u", BUILDER_USER, "-H", "--", ...withBuilderEnv(args)], opts);
+  const child = spawn("sudo", ["-u", BUILDER_USER, "-H", "--", ...args], opts);
+  // Without this, a spawn-level failure (e.g. permission/ENOENT) is an
+  // unhandled 'error' event that crashes the whole bot process — happened
+  // once already (see DEPLOYMENT.md). Log and let the caller's own
+  // close/timeout handling deal with the fallout instead.
+  child.on("error", (err) => console.error("[builder] spawn failed:", err.message));
+  return child;
+}
+
+// Run Claude Code as johnbuilder, cd'd into `dir`. Both the cd and the token
+// file read must happen *after* sudo's setuid — johnbuilder's home (and the
+// token file in it) isn't readable/traversable by revaldyas, so Node's own
+// `cwd` spawn option (which chdir's before exec, as revaldyas) fails with
+// EACCES (also happened once — see DEPLOYMENT.md). `dir` and `claudeArgs`
+// are passed as separate argv elements (bash positional params via `--`),
+// never interpolated into the script string, so untrusted text (the build
+// description) can't inject shell commands.
+function spawnClaudeAsBuilder(dir, claudeArgs, opts = {}) {
+  const script = 'cd "$1" && shift && export CLAUDE_CODE_OAUTH_TOKEN="$(cat ~/.claude_oauth_token 2>/dev/null)" && exec "$@"';
+  return spawnAsBuilder(["bash", "-c", script, "--", dir, CLAUDE_BIN, ...claudeArgs], opts);
 }
 
 function buildPrompt(description, isIteration) {
@@ -151,8 +168,7 @@ export async function startBuild({ projectName, description, chatJid, isIteratio
     error: null,
   });
 
-  const args = [
-    CLAUDE_BIN,
+  const claudeArgs = [
     "-p",
     buildPrompt(description, isIteration),
     "--permission-mode",
@@ -162,7 +178,7 @@ export async function startBuild({ projectName, description, chatJid, isIteratio
     "--output-format",
     "json",
   ];
-  const child = spawnAsBuilder(args, { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawnClaudeAsBuilder(dir, claudeArgs, { stdio: ["ignore", "pipe", "pipe"] });
 
   let stdout = "";
   let stderr = "";
