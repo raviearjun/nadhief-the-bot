@@ -1,4 +1,5 @@
 import { startBuild, listProjects, getProject } from "../builder.js";
+import { config } from "../config.js";
 
 /**
  * Web-app builder tools — owner + DM only, same reasoning as the shell skill:
@@ -7,7 +8,7 @@ import { startBuild, listProjects, getProject } from "../builder.js";
  * content. The heavy lifting and isolation live in ../builder.js.
  */
 export function skills(ctx) {
-  if (!ctx.isOwner || ctx.isGroup) return [];
+  if (!ctx.isOwner || ctx.isGroup || !config.builderClaudeToken) return [];
 
   return [
     {

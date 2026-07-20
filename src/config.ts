@@ -47,4 +47,10 @@ export const config = {
   googleClientId: process.env.GOOGLE_CLIENT_ID || "",
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
   googleRedirectUri: process.env.GOOGLE_REDIRECT_URI || "http://localhost:3000/api/google/callback",
+
+  // Long-lived Claude Code OAuth token (from `claude setup-token`) for the
+  // johnbuilder sandbox user — passed explicitly on every builder invocation
+  // (see builder.ts) since johnbuilder's own credential store doesn't retain
+  // a refresh token. build_app/list_apps/app_status disable themselves if unset.
+  builderClaudeToken: process.env.BUILDER_CLAUDE_OAUTH_TOKEN || "",
 };

@@ -32,6 +32,7 @@ import {
   isCancellation,
   executeCommand,
 } from "../skills/shell.js";
+import { getPendingCodeTask, clearPendingCodeTask, executeCodeTask } from "../skills/code.js";
 import { toWhatsAppFormat } from "../format.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -431,6 +432,40 @@ export function createMessageHandler({ waState }) {
         }
         // anything else: leave it staged (owner might be clarifying) and
         // answer normally.
+      }
+
+      // Owner Claude Code confirmation (DM only, same trust model as shell
+      // above). Coding tasks can take minutes, so unlike shell we ack right
+      // away and send the real result as a follow-up once it's done, instead
+      // of blocking this reply on the whole run.
+      const stagedCode = !staged ? getPendingCodeTask(senderNumber) : null;
+      if (stagedCode) {
+        if (isConfirmation(text)) {
+          clearPendingCodeTask(senderNumber);
+          sock.readMessages([m.key]).catch(() => {});
+          console.log(`[code] executing (owner-confirmed) in ${stagedCode.cwd}: ${stagedCode.task}`);
+          const ack = "🤖 Oke, Claude Code jalan di background — mungkin makan waktu beberapa menit, nanti aku kabari hasilnya.";
+          await sendWithRetry(chatJid, ack, m).catch((err) =>
+            console.error("[code] failed to send ack:", err.message)
+          );
+          executeCodeTask(stagedCode.task, stagedCode.cwd)
+            .then(async (result) => {
+              const header = result.ok ? "✅ Claude Code selesai" : `⚠️ Claude Code gagal (${result.code}${result.timedOut ? ", timeout" : ""})`;
+              const reply = `${header}:\n\`\`\`\n${result.output}\n\`\`\``;
+              await sendWithRetry(chatJid, reply, m).catch((err) =>
+                console.error("[code] failed to send result:", err.message)
+              );
+              insertMessage({
+                chat_jid: chatJid, chat_name: senderName, sender_jid: waState.ownJid || "bot",
+                sender_name: config.botTriggerName, is_group: 0, text: reply, is_from_me: 1, created_at: Date.now(),
+              });
+            })
+            .catch((err) => console.error("[code] executeCodeTask threw:", err.message));
+          return;
+        }
+        if (isCancellation(text)) {
+          clearPendingCodeTask(senderNumber);
+        }
       }
     }
 

@@ -2,6 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { getSocket } from "./whatsapp/connection.js";
 import { toWhatsAppFormat } from "./format.js";
+import { config } from "./config.js";
 
 const execFileP = promisify(execFile);
 
@@ -45,15 +46,25 @@ function allocatePort(slug) {
   throw new Error("no free preview port");
 }
 
+// johnbuilder's own credential store never keeps a working refresh token, so
+// every invocation gets the long-lived Claude Code OAuth token set fresh via
+// `env` (running as johnbuilder itself — sudo's env_reset would otherwise
+// strip anything passed through the parent's environment).
+function withBuilderEnv(args) {
+  return config.builderClaudeToken
+    ? ["env", `CLAUDE_CODE_OAUTH_TOKEN=${config.builderClaudeToken}`, ...args]
+    : args;
+}
+
 // Run a command AS johnbuilder — privilege drop via sudo (the bot's user has
 // NOPASSWD sudo; johnbuilder itself has none). No shell: argv is passed
 // literally, so user text in the prompt can't inject commands.
 function asBuilder(args, opts = {}) {
-  return execFileP("sudo", ["-u", BUILDER_USER, "-H", "--", ...args], opts);
+  return execFileP("sudo", ["-u", BUILDER_USER, "-H", "--", ...withBuilderEnv(args)], opts);
 }
 
 function spawnAsBuilder(args, opts = {}) {
-  return spawn("sudo", ["-u", BUILDER_USER, "-H", "--", ...args], opts);
+  return spawn("sudo", ["-u", BUILDER_USER, "-H", "--", ...withBuilderEnv(args)], opts);
 }
 
 function buildPrompt(description, isIteration) {
