@@ -16,6 +16,16 @@ export const config = {
   // low/medium/high; non-reasoning models ignore or reject unknown fields, so
   // leave unset unless the configured model actually supports it.
   llmReasoningEffort: process.env.LLM_REASONING_EFFORT || "",
+  // Other bots' numbers to never reply to (comma-separated) — stops two
+  // assistants ping-ponging each other into a loop. Normalised to 628xx.
+  ignoreNumbers: (process.env.IGNORE_NUMBERS || "")
+    .split(",")
+    .map((s) => {
+      let n = s.replace(/\D/g, "");
+      if (n.startsWith("0")) n = "62" + n.slice(1);
+      return n;
+    })
+    .filter(Boolean),
   // Separate vision-capable model on the same endpoint (the chat model stays
   // text-only). Empty = photo understanding disabled.
   llmVisionModel: process.env.LLM_VISION_MODEL || "",

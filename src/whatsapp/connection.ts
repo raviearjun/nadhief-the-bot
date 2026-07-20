@@ -50,14 +50,7 @@ export async function startWhatsApp(onMessage) {
     logger: pino({ level: "silent" }),
     printQRInTerminal: false,
     browser: ["WA Personal Bot", "Chrome", "1.0"],
-    // Baileys declares "Connection was lost" (408) when no frame arrives
-    // within keepAliveIntervalMs + 5s. The old 10s value (a workaround for
-    // the previous host's genuinely lossy network) made that threshold 15s —
-    // tight enough that a slightly late ping response killed a healthy
-    // connection, which matched the observed false-drop clusters. This VPS's
-    // path to WhatsApp is clean (0% loss, ~1ms), so trust it longer; real
-    // drops are still caught, just a few seconds later, and the reconnect +
-    // reply-retry layers absorb those.
+   
     keepAliveIntervalMs: 25_000,
   });
 

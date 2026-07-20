@@ -345,10 +345,13 @@ export function createMessageHandler({ waState }) {
     // previously the mute confirmation itself restarted the continuation
     // window and John kept "peeking out from under the table" forever.
     const settings = isGroup ? getChatSettings(chatJid) : null;
+    // Never engage another bot: captured for group summaries, but no reply and
+    // no ambient/proactive triggers — breaks bot-to-bot loops.
+    const ignored = config.ignoreNumbers.includes(normalizeNumber(senderNumber));
     const explicit = isGroup && (isMentioned(m, waState) || isReplyToBot(m, waState));
-    const ambientAllowed = isGroup && settings.proactive === 1 && settings.muted_until < Date.now();
+    const ambientAllowed = isGroup && !ignored && settings.proactive === 1 && settings.muted_until < Date.now();
     const triggered = explicit || (ambientAllowed && isRecentExchange(chatJid, senderNumber));
-    let shouldReply = whitelisted && (isGroup ? triggered : true);
+    let shouldReply = whitelisted && !ignored && (isGroup ? triggered : true);
     let proactive = false;
 
     if (whitelisted) {
