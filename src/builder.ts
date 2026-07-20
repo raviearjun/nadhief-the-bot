@@ -149,6 +149,52 @@ async function notify(chatJid, text) {
   }
 }
 
+// `--output-format stream-json` emits one JSON object per line as Claude Code
+// works (tool calls, messages, the final result) instead of staying silent
+// until the whole run ends. Pure read-side: doesn't touch the running build,
+// just lets app_status/list_apps report what's actually happening right now.
+function trackProgress(slug, line) {
+  let evt;
+  try {
+    evt = JSON.parse(line);
+  } catch {
+    return; // stray non-JSON output (e.g. a warning) — ignore, not fatal
+  }
+  const p = projects.get(slug);
+  if (!p) return;
+
+  let action = null;
+  if (evt.type === "assistant" && Array.isArray(evt.message?.content)) {
+    for (const block of evt.message.content) {
+      if (block.type === "tool_use") {
+        const detail = block.input?.command || block.input?.file_path || block.input?.path || "";
+        action = `🔧 ${block.name}${detail ? `: ${String(detail).slice(0, 80)}` : ""}`;
+      } else if (block.type === "text" && block.text?.trim()) {
+        action = block.text.trim().slice(0, 200);
+      }
+    }
+  } else if (evt.type === "result") {
+    action = evt.is_error ? `❌ ${String(evt.result || "error").slice(0, 200)}` : "✅ selesai, lagi diserve...";
+  }
+  if (action) {
+    projects.set(slug, { ...p, progress: { action, updatedAt: Date.now(), turns: (p.progress?.turns ?? 0) + 1 } });
+  }
+}
+
+// child.stdout 'data' events don't align with NDJSON line boundaries.
+function makeLineSplitter(onLine) {
+  let buf = "";
+  return (chunk) => {
+    buf += chunk;
+    let idx;
+    while ((idx = buf.indexOf("\n")) !== -1) {
+      const line = buf.slice(0, idx);
+      buf = buf.slice(idx + 1);
+      if (line.trim()) onLine(line);
+    }
+  };
+}
+
 /**
  * Kick off a build. Returns immediately; the owner is DM'd when it finishes.
  */
@@ -176,13 +222,13 @@ export async function startBuild({ projectName, description, chatJid, isIteratio
     "--max-turns",
     MAX_TURNS,
     "--output-format",
-    "json",
+    "stream-json",
+    "--verbose",
   ];
   const child = spawnClaudeAsBuilder(dir, claudeArgs, { stdio: ["ignore", "pipe", "pipe"] });
 
-  let stdout = "";
   let stderr = "";
-  child.stdout.on("data", (d) => (stdout += d));
+  child.stdout.on("data", makeLineSplitter((line) => trackProgress(slug, line)));
   child.stderr.on("data", (d) => (stderr += d));
 
   const timer = setTimeout(() => child.kill("SIGKILL"), BUILD_TIMEOUT_MS);
@@ -191,7 +237,7 @@ export async function startBuild({ projectName, description, chatJid, isIteratio
     clearTimeout(timer);
     const p = projects.get(slug);
     if (code !== 0) {
-      const msg = (stderr || stdout || "unknown error").slice(-600);
+      const msg = (stderr.trim() || p?.progress?.action || "unknown error").slice(-600);
       projects.set(slug, { ...p, status: "failed", finishedAt: Date.now(), error: msg });
       await notify(chatJid, `⚠️ Build "*${slug}*" gagal.\n\`\`\`\n${msg}\n\`\`\`\nCoba minta lagi atau ubah deskripsinya.`);
       return;
@@ -221,6 +267,7 @@ export function listProjects() {
     status: p.status,
     url: p.port ? `http://${PUBLIC_HOST}:${p.port}` : null,
     description: p.description,
+    progress: p.status === "building" ? p.progress?.action : undefined,
   }));
 }
 
@@ -228,5 +275,12 @@ export function getProject(slug) {
   const s = slugify(slug);
   const p = projects.get(s);
   if (!p) return null;
-  return { slug: s, status: p.status, url: p.port ? `http://${PUBLIC_HOST}:${p.port}` : null, error: p.error };
+  return {
+    slug: s,
+    status: p.status,
+    url: p.port ? `http://${PUBLIC_HOST}:${p.port}` : null,
+    error: p.error,
+    progress: p.status === "building" ? p.progress?.action : undefined,
+    progress_updated_seconds_ago: p.status === "building" && p.progress ? Math.round((Date.now() - p.progress.updatedAt) / 1000) : undefined,
+  };
 }

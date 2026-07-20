@@ -78,7 +78,11 @@ export function skills(ctx) {
         type: "function",
         function: {
           name: "app_status",
-          description: "Check the status and live link of one built app by its project name.",
+          description:
+            "Check the status and live link of one built app by its project name. While status is \"building\", " +
+            "the response includes a `progress` field (the agent's last action) and " +
+            "`progress_updated_seconds_ago` — use this to answer 'gimana progress-nya?' during a build instead " +
+            "of just saying 'masih diproses'.",
           parameters: {
             type: "object",
             properties: { project_name: { type: "string" } },
