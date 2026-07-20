@@ -207,6 +207,47 @@ sudo chown johnbuilder:johnbuilder /home/johnbuilder/.claude_oauth_token
 sudo rm -f /tmp/x.txt
 ```
 
+### 3. Cross-server SSH access (added 2026-07-20)
+
+`run_shell_command` can also reach other servers the owner manages, not just
+this VPS — **including production servers for other products** (Sentuh Rasa,
+Rosalie, Biks). This was an explicit, informed decision by the owner (asked
+and confirmed before implementing) to include production, using the same
+owner-only/DM-only/staged-confirmation gate as everything else in
+`shell.ts` — there's no extra friction for `*-prod` hosts beyond the model
+being prompted to call it out explicitly when staging a command there.
+
+Setup: a **dedicated ed25519 keypair** (`~/.ssh/john_crossserver_ed25519` on
+`balesoftware`, no passphrase) was generated specifically for this — not
+reusing `revaldyas`'s personal key — so it can be revoked from the target
+servers' `authorized_keys` independently without touching the owner's own
+SSH access. Its public key was appended to `~/.ssh/authorized_keys` on each
+target server, and `~/.ssh/config` on `balesoftware` has matching `Host`
+aliases pointing `IdentityFile` at it:
+
+```
+flamestreet                                    (user revaldyas)
+biks-prod / sentuh-rasa-prod / rosalie-prod    (user root — PRODUCTION)
+biks-dev / sentuh-rasa-dev / rosalie-dev       (user dev-biks)
+baba-vps / srv1525520                          (user root)
+```
+
+**Not included:** `ssh.arvaya.id` — its `ProxyCommand` needs `cloudflared`,
+which wasn't available in the environment used to set this up. Add it the
+same way (generate-once keypair already exists, just needs `cloudflared`
+installed wherever the connection is initiated from, or a different access
+path) if it's ever needed.
+
+**If access needs to be revoked:** remove the `john_crossserver_ed25519.pub`
+line from `~/.ssh/authorized_keys` on the specific target server(s) — this
+doesn't affect `revaldyas`'s own SSH access to those servers, only John's.
+
+Claude Code itself (the `claude` CLI) is **not** installed on any of these
+other servers — only plain shell access via `run_shell_command`. Extending
+`run_claude_code`-style headless Claude Code access to them would need a
+separate install + OAuth setup per server (same dance as `johnbuilder` above)
+and hasn't been requested/done.
+
 **Never** put this token in `~/wabot/.env` or pass it via `env VAR=val` in
 any command `revaldyas` runs directly — that's exactly what leaked it last
 time. It must only ever be read by a process already running as
