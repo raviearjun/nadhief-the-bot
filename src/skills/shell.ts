@@ -81,11 +81,16 @@ export function skills(ctx) {
           name: "run_shell_command",
           description:
             "Stage a shell command to run on the VPS this bot lives on (Ubuntu, user revaldyas, sudo works " +
-            "without a password). Use when the owner asks you to do something on the server: check/edit files, " +
-            "manage services, install packages, inspect logs, etc. IMPORTANT: this does NOT run the command " +
-            "immediately — it stages it. After calling this, show the exact command to the owner and ask them " +
-            "to confirm; the system runs it only once they reply 'ya'/'gas'. Compose the full command yourself " +
-            "(pipes, sudo, etc. all allowed).",
+            "without a password). Also has SSH access configured to other servers the owner manages — use " +
+            "`ssh <alias> \"<command>\"` as the staged command to reach them: flamestreet, biks-prod / " +
+            "sentuh-rasa-prod / rosalie-prod (⚠️ PRODUCTION, root — Sentuh Rasa & Rosalie live servers), " +
+            "biks-dev / sentuh-rasa-dev / rosalie-dev, baba-vps / srv1525520. Be extra careful and explicit " +
+            "about which server a command targets when it's one of the *-prod aliases — confirm the owner really " +
+            "means production before staging anything destructive there. Use when the owner asks you to do " +
+            "something on a server: check/edit files, manage services, install packages, inspect logs, etc. " +
+            "IMPORTANT: this does NOT run the command immediately — it stages it. After calling this, show the " +
+            "exact command (and which server) to the owner and ask them to confirm; the system runs it only once " +
+            "they reply 'ya'/'gas'. Compose the full command yourself (pipes, sudo, etc. all allowed).",
           parameters: {
             type: "object",
             properties: {
