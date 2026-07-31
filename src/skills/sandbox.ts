@@ -15,21 +15,38 @@ import { logLlmUsage } from "../db.js";
 const EXEC_TIMEOUT_SEC = 60;
 const MAX_OUTPUT = 4000;
 
-// Appended to Python runs: encodes every open matplotlib figure as base64 PNG
-// on stdout (Daytona's own auto chart-capture doesn't fire on the default
-// sandbox). Runs in the SAME process as the user code, so it sees their
-// figures whether or not they called plt.show(). Silently no-ops without
-// matplotlib / figures.
+// matplotlib chart capture (Daytona's own artifacts.charts stays empty on the
+// default sandbox). Only injected when the code actually uses matplotlib, to
+// keep other runs fast. The prologue forces a headless backend and patches
+// plt.show() to snapshot + close figures (plt.show() otherwise closes them
+// before we can read them); the epilogue catches figures that were never
+// shown, then prints each as a base64 PNG marker on stdout.
+const CHART_PROLOGUE = `
+try:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as _p
+    import io as _io, base64 as _b64
+    _charts = []
+    def _cap():
+        for _n in _p.get_fignums():
+            _b = _io.BytesIO(); _p.figure(_n).savefig(_b, format="png", bbox_inches="tight")
+            _charts.append(_b64.b64encode(_b.getvalue()).decode())
+        _p.close("all")
+    _p.show = lambda *a, **k: _cap()
+except Exception:
+    _charts = None
+`;
 const CHART_EPILOGUE = `
 try:
-    import io as _io, base64 as _b64
-    import matplotlib.pyplot as _p
-    for _n in _p.get_fignums():
-        _b = _io.BytesIO(); _p.figure(_n).savefig(_b, format="png", bbox_inches="tight")
-        print("__CHART_PNG__" + _b64.b64encode(_b.getvalue()).decode())
+    if _charts is not None:
+        _cap()
+        for _c in _charts:
+            print("__CHART_PNG__" + _c)
 except Exception:
     pass
 `;
+const usesMatplotlib = (code: string) => /matplotlib|pyplot|seaborn|\bplt\b/.test(code);
 
 function langToCode(language = "python"): { shell: boolean; codeLang: string } {
   const l = String(language).toLowerCase();
@@ -49,9 +66,11 @@ async function runCode(ctx, { language, code }: any) {
   let sandbox: any;
   try {
     sandbox = await daytona.create(shell ? undefined : { language: codeLang });
+    const withCharts = isPython && usesMatplotlib(code);
+    const finalCode = withCharts ? `${CHART_PROLOGUE}\n${code}\n${CHART_EPILOGUE}` : code;
     const resp = shell
       ? await sandbox.process.executeCommand(code, undefined, undefined, EXEC_TIMEOUT_SEC)
-      : await sandbox.process.codeRun(isPython ? code + "\n" + CHART_EPILOGUE : code, undefined, EXEC_TIMEOUT_SEC);
+      : await sandbox.process.codeRun(finalCode, undefined, EXEC_TIMEOUT_SEC);
 
     let out = String(resp.result ?? resp.artifacts?.stdout ?? "");
 
