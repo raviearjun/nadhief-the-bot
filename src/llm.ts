@@ -203,6 +203,24 @@ export async function ocrPdfViaFiles(buffer: Buffer, fileName = "document.pdf"):
   }
 }
 
+/**
+ * Answer a question about a document the user just sent, in a single clean LLM
+ * call that deliberately EXCLUDES the chat history. Some chats had the bot
+ * wrongly refusing to read files ("upload to Drive"); that history primed it to
+ * keep refusing even once the text was extracted. Answering from just the file
+ * text + question sidesteps the poisoned history entirely.
+ */
+export async function answerAboutDocument(fileName, content, question, viaOcr = false) {
+  const system =
+    `Nama kamu ${config.botDisplayName}. Kamu BARU SAJA berhasil membaca sebuah file yang dikirim user langsung ` +
+    `di WhatsApp${viaOcr ? " (PDF hasil scan/gambar, dibaca via OCR)" : ""} — jadi kamu MEMANG BISA membaca file yang ` +
+    `dikirim di chat. Jawab pertanyaan user HANYA berdasarkan isi file di bawah. JANGAN pernah bilang kamu tidak bisa ` +
+    `baca file/PDF dan JANGAN menyuruh upload ke Google Drive. Jawab ringkas dan jelas (ini WhatsApp, jawaban pendek), ` +
+    `pakai bahasa yang sama dengan user. Format WhatsApp: *tebal* satu bintang, tanpa heading/tabel markdown.\n\n` +
+    `Isi file "${fileName}":\n"""\n${content}\n"""`;
+  return chat([{ role: "system", content: system }, { role: "user", content: question }], { purpose: "document" });
+}
+
 const URL_RE = /https?:\/\/[^\s)>\]]+/gi;
 
 export function extractLinks(text) {

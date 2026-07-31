@@ -20,7 +20,7 @@ import {
   isRecentExchange,
 } from "../db.js";
 import { downloadMediaMessage } from "@whiskeysockets/baileys";
-import { summarizeMessages, answerQuestion, analyzeMessage, extractLinks, describeImage, ocrPdfViaFiles } from "../llm.js";
+import { summarizeMessages, answerQuestion, analyzeMessage, extractLinks, describeImage, ocrPdfViaFiles, answerAboutDocument } from "../llm.js";
 import { isReadableDocument, extractDocumentText, clipForPrompt } from "../document.js";
 import { buildSkills } from "../skills/index.js";
 import { isGoogleConnected } from "../google.js";
@@ -651,10 +651,13 @@ export function createMessageHandler({ waState }) {
         if (!query) return; // no caption and no description — nothing to answer
       }
 
-      // Documents: download, extract text, and fold it into this turn's query
-      // so the LLM answers from the actual file contents. The stored history
-      // row keeps only a compact "[dokumen: name]" label — the (possibly large)
-      // extracted text rides along only in this one request.
+      // Documents: download, extract text, and answer from the file contents.
+      // A successful read is answered via a dedicated clean LLM call
+      // (docReply) that excludes chat history — some chats had the bot wrongly
+      // refusing to read files, and that history kept priming it to refuse even
+      // with the text in hand. The stored history row keeps only a compact
+      // "[dokumen: name]" label.
+      let docReply;
       if (docInfo) {
         const fname = docInfo.meta.fileName || "dokumen";
         const size = Number(docInfo.meta.fileLength || 0);
@@ -684,15 +687,14 @@ export function createMessageHandler({ waState }) {
             if (content) {
               const { text: clipped, truncated } = clipForPrompt(content);
               console.log(`[handler] document read: ${fname} chars=${content.length}${truncated ? " (clipped)" : ""} ocr=${viaOcr}`);
-              const ask = query || `Tolong baca lalu ringkas dan jelaskan isi file "${fname}" ini.`;
-              // Forceful framing: earlier in some chats the bot kept refusing
-              // ("can't read PDFs, upload to Drive"); once the text is in hand it
-              // must NOT keep pattern-matching that refusal from history.
-              query =
-                `[SISTEM] File "${fname}" SUDAH berhasil kamu baca${viaOcr ? " (via OCR, PDF hasil scan/gambar)" : ""} dan teks lengkapnya ada di bawah. ` +
-                `Kamu PUNYA isinya sekarang — jawab pertanyaan pengguna berdasarkan teks ini. JANGAN menolak, JANGAN bilang kamu tidak bisa baca file/PDF, dan JANGAN menyuruh upload ke Google Drive.\n\n` +
-                `ISI FILE${truncated ? " (dipotong karena panjang)" : ""}:\n"""\n${clipped}\n"""\n\n` +
-                `Permintaan pengguna: ${ask}`;
+              const ask = text || `Tolong ringkas dan jelaskan isi file "${fname}" ini.`;
+              // Clean, history-free answer so a chat full of past "can't read
+              // files" refusals can't prime the model to refuse again.
+              docReply = await withTimeout(
+                answerAboutDocument(fname, clipped, ask, viaOcr),
+                75_000,
+                "answerAboutDocument"
+              );
             } else {
               console.log(`[handler] document unreadable: ${fname} isPdf=${isPdf}`);
               query = `Pengguna mengirim file "${fname}" tapi teksnya tidak terbaca. Beri tahu dengan sopan.`;
@@ -707,6 +709,9 @@ export function createMessageHandler({ waState }) {
       // Longer than the old 35s: a skill chain (e.g. search -> weather) can
       // legitimately take a few LLM rounds plus external API calls.
       let rawReply;
+      if (typeof docReply === "string" && docReply) {
+        rawReply = docReply; // document answered via the dedicated history-free path
+      } else
       try {
         rawReply = await withTimeout(routeCommand(query, ctx), 75_000, "routeCommand");
       } catch (firstErr) {
