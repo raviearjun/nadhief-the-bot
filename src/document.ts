@@ -68,7 +68,11 @@ async function extractPdf(buffer: Buffer): Promise<string> {
   const parser = new PDFParse({ data: buffer });
   try {
     const res = await parser.getText();
-    return res.text || "";
+    // pdf-parse inserts "-- N of M --" page separators. Strip them so an
+    // image-only / scanned PDF (no text layer) collapses to empty instead of
+    // looking like it had content — that lets the caller give a clear
+    // "this looks like a scan, I can't read it" answer.
+    return (res.text || "").replace(/^-- \d+ of \d+ --$/gm, "").trim();
   } finally {
     await parser.destroy().catch(() => {});
   }
