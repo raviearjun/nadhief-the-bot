@@ -143,6 +143,66 @@ export async function describeImage(imageDataUrl, hint = "") {
   return data.choices[0].message.content?.trim() || null;
 }
 
+/**
+ * OCR a PDF that has no extractable text layer (scanned/image PDF). Uploads it
+ * to the provider's Files API — which rasterises the PDF to one image per page
+ * at upload time — then asks the vision model to transcribe every page. Reuses
+ * the same aggregator + vision model as photos; no local OCR engine needed.
+ * Returns the transcribed text (empty string if unavailable). The uploaded file
+ * is deleted afterwards (privacy + housekeeping).
+ */
+export async function ocrPdfViaFiles(buffer: Buffer, fileName = "document.pdf"): Promise<string> {
+  if (!config.llmVisionModel) return "";
+
+  const fd = new FormData();
+  fd.append("file", new Blob([buffer], { type: "application/pdf" }), fileName || "document.pdf");
+  fd.append("purpose", "document");
+  const up = await fetch(`${config.llmBaseUrl}/files`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${config.llmApiKey}` },
+    body: fd,
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (!up.ok) throw new Error(`file upload error ${up.status}: ${(await up.text().catch(() => "")).slice(0, 200)}`);
+  const file = (await up.json()) as any;
+
+  try {
+    const res = await fetch(LLM_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.llmApiKey}` },
+      body: JSON.stringify({
+        model: config.llmVisionModel,
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text:
+                  "Ekstrak SELURUH teks dari dokumen ini apa adanya (semua halaman), pertahankan urutan dan " +
+                  "struktur. Kalau ada tabel, tuliskan rapi baris per baris. Jangan menambahkan komentar, " +
+                  "ringkasan, atau opini — keluarkan hanya teks yang ada di dokumen.",
+              },
+              { type: "file", file: { file_id: file.id } },
+            ],
+          },
+        ],
+        max_tokens: 4000,
+      }),
+      signal: AbortSignal.timeout(90_000),
+    });
+    if (!res.ok) throw new Error(`vision OCR error ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`);
+    const data = (await res.json()) as any;
+    logLlmUsage("vision", data.usage);
+    return (data.choices?.[0]?.message?.content || "").trim();
+  } finally {
+    fetch(`${config.llmBaseUrl}/files/${file.id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${config.llmApiKey}` },
+    }).catch(() => {});
+  }
+}
+
 const URL_RE = /https?:\/\/[^\s)>\]]+/gi;
 
 export function extractLinks(text) {

@@ -20,7 +20,7 @@ import {
   isRecentExchange,
 } from "../db.js";
 import { downloadMediaMessage } from "@whiskeysockets/baileys";
-import { summarizeMessages, answerQuestion, analyzeMessage, extractLinks, describeImage } from "../llm.js";
+import { summarizeMessages, answerQuestion, analyzeMessage, extractLinks, describeImage, ocrPdfViaFiles } from "../llm.js";
 import { isReadableDocument, extractDocumentText, clipForPrompt } from "../document.js";
 import { buildSkills } from "../skills/index.js";
 import { isGoogleConnected } from "../google.js";
@@ -666,15 +666,30 @@ export function createMessageHandler({ waState }) {
             const raw = await extractDocumentText(buffer as Buffer, fname, docInfo.meta.mimetype || "");
             const label = docInfo.quoted ? "membalas dokumen" : "dokumen";
             updateMessageText(messageId, `[${label}: ${fname}]${text ? ` ${text}` : ""}`);
-            if (raw) {
-              const { text: clipped, truncated } = clipForPrompt(raw);
+            // Scanned / image-based PDFs have no text layer, so local
+            // extraction comes back empty. Fall back to OCR: upload the PDF to
+            // the provider's Files API (rasterises to per-page images) and let
+            // the vision model transcribe it.
+            let content = raw;
+            let viaOcr = false;
+            const isPdf = /pdf/i.test(docInfo.meta.mimetype || "") || /\.pdf$/i.test(fname);
+            if (!content && isPdf) {
+              try {
+                content = await ocrPdfViaFiles(buffer as Buffer, fname);
+                viaOcr = !!content;
+              } catch (e) {
+                console.error("[handler] pdf OCR failed:", e.message);
+              }
+            }
+            if (content) {
+              const { text: clipped, truncated } = clipForPrompt(content);
               const ask = query || `Tolong baca lalu ringkas dan jelaskan isi file "${fname}" ini.`;
               query =
-                `Pengguna mengirim file "${fname}". Berikut teks yang berhasil diekstrak dari file itu` +
-                `${truncated ? " (dipotong karena panjang)" : ""}:\n"""\n${clipped}\n"""\n\n` +
+                `Pengguna mengirim file "${fname}"${viaOcr ? " (PDF hasil scan/gambar, teks dibaca via OCR)" : ""}. ` +
+                `Berikut teks yang berhasil diekstrak dari file itu${truncated ? " (dipotong karena panjang)" : ""}:\n"""\n${clipped}\n"""\n\n` +
                 `Permintaan pengguna: ${ask}\n(Jawab berdasarkan isi file di atas; jangan mengarang di luar itu.)`;
             } else {
-              query = `Pengguna mengirim file "${fname}" tapi teksnya kosong/tidak terbaca (mungkin file berbasis gambar/scan). Beri tahu dengan sopan.`;
+              query = `Pengguna mengirim file "${fname}" tapi teksnya kosong/tidak terbaca. Beri tahu dengan sopan.`;
             }
           } catch (err) {
             console.error("[handler] document parse failed:", err.message);
