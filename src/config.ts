@@ -31,6 +31,7 @@ export const config = {
   llmVisionModel: process.env.LLM_VISION_MODEL || "",
   tavilyApiKey: process.env.TAVILY_API_KEY || "", // optional — web search tool disabled if empty
   exaApiKey: process.env.EXA_API_KEY || "", // optional — find_companies (Exa lead-gen) disabled if empty
+  daytonaApiKey: process.env.DAYTONA_API_KEY || "", // optional — run_code (Daytona sandbox) disabled if empty
   youtubeApiKey: process.env.YOUTUBE_API_KEY || "", // optional — YouTube search skill disabled if empty
   githubToken: process.env.GITHUB_TOKEN || "", // optional — GitHub skills disabled if empty
   ownerNumber: required("OWNER_NUMBER"), // e.g. "6281234567890"
