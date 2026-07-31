@@ -6,13 +6,30 @@ import { logLlmUsage } from "../db.js";
  * Run code in a disposable, fully-isolated Daytona sandbox and return its
  * output. Lets the bot actually COMPUTE / process data instead of guessing —
  * math, data analysis (e.g. an Excel/CSV the user just sent), transforms,
- * quick scripts. matplotlib charts produced by the code are sent back into the
- * chat as images. Safe: the code never touches the production VPS, and the
- * sandbox is deleted right after. Disabled unless DAYTONA_API_KEY is set.
+ * quick scripts. Any matplotlib figures the code produces are captured and
+ * sent back into the chat as images. Safe: the code never touches the
+ * production VPS, and the sandbox is deleted right after. Disabled unless
+ * DAYTONA_API_KEY is set.
  */
 
 const EXEC_TIMEOUT_SEC = 60;
 const MAX_OUTPUT = 4000;
+
+// Appended to Python runs: encodes every open matplotlib figure as base64 PNG
+// on stdout (Daytona's own auto chart-capture doesn't fire on the default
+// sandbox). Runs in the SAME process as the user code, so it sees their
+// figures whether or not they called plt.show(). Silently no-ops without
+// matplotlib / figures.
+const CHART_EPILOGUE = `
+try:
+    import io as _io, base64 as _b64
+    import matplotlib.pyplot as _p
+    for _n in _p.get_fignums():
+        _b = _io.BytesIO(); _p.figure(_n).savefig(_b, format="png", bbox_inches="tight")
+        print("__CHART_PNG__" + _b64.b64encode(_b.getvalue()).decode())
+except Exception:
+    pass
+`;
 
 function langToCode(language = "python"): { shell: boolean; codeLang: string } {
   const l = String(language).toLowerCase();
@@ -27,30 +44,40 @@ async function runCode(ctx, { language, code }: any) {
   logLlmUsage("daytona_run_code", null); // call-count visibility; Daytona billed separately
 
   const { shell, codeLang } = langToCode(language);
+  const isPython = !shell && codeLang === "python";
   const daytona = new Daytona({ apiKey: config.daytonaApiKey });
   let sandbox: any;
   try {
     sandbox = await daytona.create(shell ? undefined : { language: codeLang });
     const resp = shell
       ? await sandbox.process.executeCommand(code, undefined, undefined, EXEC_TIMEOUT_SEC)
-      : await sandbox.process.codeRun(code, undefined, EXEC_TIMEOUT_SEC);
+      : await sandbox.process.codeRun(isPython ? code + "\n" + CHART_EPILOGUE : code, undefined, EXEC_TIMEOUT_SEC);
 
-    // Send any matplotlib charts straight into the chat as images.
+    let out = String(resp.result ?? resp.artifacts?.stdout ?? "");
+
+    // Pull out chart PNGs the epilogue printed, send them as images, and strip
+    // those marker lines from the text output.
     let chartsSent = 0;
-    for (const ch of resp.artifacts?.charts ?? []) {
-      if (ch?.png) {
-        try {
-          await ctx.sock.sendMessage(ctx.chatJid, { image: Buffer.from(ch.png, "base64"), caption: ch.title || "grafik" });
-          chartsSent++;
-        } catch {}
+    if (isPython && out.includes("__CHART_PNG__")) {
+      const kept: string[] = [];
+      for (const line of out.split("\n")) {
+        const m = line.match(/^__CHART_PNG__(.+)$/);
+        if (m) {
+          try {
+            await ctx.sock.sendMessage(ctx.chatJid, { image: Buffer.from(m[1], "base64"), caption: "grafik" });
+            chartsSent++;
+          } catch {}
+        } else {
+          kept.push(line);
+        }
       }
+      out = kept.join("\n");
     }
 
-    const out = String(resp.result ?? resp.artifacts?.stdout ?? "");
-    const output = out.length > MAX_OUTPUT ? out.slice(0, MAX_OUTPUT) + "\n…(output dipotong)" : out;
+    out = out.length > MAX_OUTPUT ? out.slice(0, MAX_OUTPUT) + "\n…(output dipotong)" : out;
     return {
       exitCode: resp.exitCode,
-      output: output || "(tidak ada output teks)",
+      output: out.trim() || (chartsSent ? "(grafik terkirim, tanpa output teks)" : "(tidak ada output teks)"),
       ...(chartsSent ? { charts_sent: chartsSent } : {}),
     };
   } catch (e: any) {
@@ -79,7 +106,7 @@ export function skills(ctx) {
             type: "object",
             properties: {
               language: { type: "string", enum: ["python", "javascript", "typescript", "bash"], description: "Bahasa. Default python (paling lengkap untuk data/plot)." },
-              code: { type: "string", description: "Kode lengkap yang siap dijalankan. Pakai print()/console.log() untuk output. Untuk grafik: matplotlib, cukup plt.show() (jangan simpan file)." },
+              code: { type: "string", description: "Kode lengkap yang siap dijalankan. Pakai print()/console.log() untuk output. Untuk grafik: pakai matplotlib biasa (plt.bar/plot/...); tidak perlu savefig — figure otomatis dikirim." },
             },
             required: ["code"],
           },
