@@ -9,30 +9,111 @@ const LLM_URL = `${config.llmBaseUrl}/chat/completions`;
 // more headroom than a flash model would need.
 const REQUEST_TIMEOUT_MS = 45_000;
 
+// Idle (not total) timeout: reset every time a chunk arrives, so a long but
+// steadily-progressing generation is never killed — only a genuinely stalled
+// connection (no bytes for this long) aborts. Reasoning models stream their
+// "thinking" as delta.reasoning, which keeps this alive during long thinks.
+const STREAM_IDLE_TIMEOUT_MS = 90_000;
+
+/**
+ * POST a chat completion with stream:true and consume the SSE, accumulating the
+ * assistant content and any tool_calls. Returns once the stream ends. This is
+ * the anti-timeout core: instead of one hard deadline on the whole request, we
+ * only abort when the stream goes silent for STREAM_IDLE_TIMEOUT_MS.
+ */
+async function streamCompletion(payload: any, { purpose }: any = {}) {
+  const controller = new AbortController();
+  let idle: any;
+  const bump = () => {
+    clearTimeout(idle);
+    idle = setTimeout(() => controller.abort(new Error("stream idle timeout")), STREAM_IDLE_TIMEOUT_MS);
+  };
+  bump();
+
+  let res: Response;
+  try {
+    res = await fetch(LLM_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.llmApiKey}` },
+      body: JSON.stringify({ ...payload, stream: true, stream_options: { include_usage: true } }),
+      signal: controller.signal,
+    });
+  } catch (e) {
+    clearTimeout(idle);
+    throw e;
+  }
+  if (!res.ok || !res.body) {
+    clearTimeout(idle);
+    const body = await res.text().catch(() => "");
+    throw new Error(`LLM API error ${res.status}: ${body.slice(0, 300)}`);
+  }
+
+  let content = "";
+  const toolCalls: any[] = [];
+  let usage: any = null;
+  let finishReason: string | null = null;
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bump();
+      buffer += decoder.decode(value, { stream: true });
+      let nl: number;
+      while ((nl = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, nl).trim();
+        buffer = buffer.slice(nl + 1);
+        if (!line.startsWith("data:")) continue;
+        const data = line.slice(5).trim();
+        if (data === "[DONE]") continue;
+        let json: any;
+        try {
+          json = JSON.parse(data);
+        } catch {
+          continue;
+        }
+        if (json.usage) usage = json.usage;
+        const choice = json.choices?.[0];
+        if (!choice) continue;
+        const delta = choice.delta || {};
+        if (typeof delta.content === "string") content += delta.content;
+        if (Array.isArray(delta.tool_calls)) {
+          for (const tc of delta.tool_calls) {
+            const i = tc.index ?? 0;
+            if (!toolCalls[i]) toolCalls[i] = { id: "", type: "function", function: { name: "", arguments: "" } };
+            if (tc.id) toolCalls[i].id = tc.id;
+            if (tc.type) toolCalls[i].type = tc.type;
+            if (tc.function?.name) toolCalls[i].function.name = tc.function.name;
+            if (tc.function?.arguments) toolCalls[i].function.arguments += tc.function.arguments;
+          }
+        }
+        if (choice.finish_reason) finishReason = choice.finish_reason;
+      }
+    }
+  } finally {
+    clearTimeout(idle);
+    try {
+      reader.releaseLock();
+    } catch {}
+  }
+
+  logLlmUsage(purpose ?? "unknown", usage);
+  return { content, toolCalls: toolCalls.filter(Boolean), finishReason };
+}
+
 async function chat(messages, { purpose, temperature = 0.3 }: any = {}) {
-  const res = await fetch(LLM_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${config.llmApiKey}`,
-    },
-    body: JSON.stringify({
+  const { content } = await streamCompletion(
+    {
       model: config.llmModel,
       messages,
       temperature,
       ...(config.llmReasoningEffort ? { reasoning_effort: config.llmReasoningEffort } : {}),
-    }),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-  });
-
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`LLM API error ${res.status}: ${body}`);
-  }
-
-  const data = await res.json() as any;
-  logLlmUsage(purpose ?? "unknown", data.usage);
-  return data.choices[0].message.content;
+    },
+    { purpose }
+  );
+  return content;
 }
 
 /**
@@ -48,37 +129,23 @@ async function chatWithTools(messages, { purpose, temperature = 0.3, maxRounds =
   const msgs = [...messages];
 
   for (let round = 0; round < maxRounds; round++) {
-    const res = await fetch(LLM_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${config.llmApiKey}`,
-      },
-      body: JSON.stringify({
+    const { content, toolCalls } = await streamCompletion(
+      {
         model: config.llmModel,
         messages: msgs,
         temperature,
         ...(tools ? { tools, tool_choice: "auto" } : {}),
         ...(config.llmReasoningEffort ? { reasoning_effort: config.llmReasoningEffort } : {}),
-      }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
+      },
+      { purpose }
+    );
 
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(`LLM API error ${res.status}: ${body}`);
+    if (!toolCalls.length) {
+      return content;
     }
 
-    const data = await res.json() as any;
-    logLlmUsage(purpose ?? "unknown", data.usage);
-    const message = data.choices[0].message;
-
-    if (!message.tool_calls?.length) {
-      return message.content;
-    }
-
-    msgs.push(message);
-    for (const call of message.tool_calls) {
+    msgs.push({ role: "assistant", content: content || "", tool_calls: toolCalls });
+    for (const call of toolCalls) {
       let result;
       try {
         const args = JSON.parse(call.function.arguments || "{}");
