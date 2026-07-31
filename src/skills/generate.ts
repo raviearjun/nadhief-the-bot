@@ -1,5 +1,9 @@
-import PptxGenJS from "pptxgenjs";
+import PptxGenJSImport from "pptxgenjs";
 import PDFDocument from "pdfkit";
+
+// Under tsx/ESM interop the default import is a namespace wrapper; the actual
+// constructor lives on `.default`.
+const PptxGenJS: any = (PptxGenJSImport as any)?.default || PptxGenJSImport;
 
 /**
  * Generate documents for the user and send them straight into the chat as a
