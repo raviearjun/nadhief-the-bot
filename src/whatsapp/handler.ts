@@ -21,6 +21,7 @@ import {
 } from "../db.js";
 import { downloadMediaMessage } from "@whiskeysockets/baileys";
 import { summarizeMessages, answerQuestion, analyzeMessage, extractLinks, describeImage } from "../llm.js";
+import { isReadableDocument, extractDocumentText, clipForPrompt } from "../document.js";
 import { buildSkills } from "../skills/index.js";
 import { isGoogleConnected } from "../google.js";
 import { getSocket } from "./connection.js";
@@ -98,6 +99,8 @@ function getMessageText(m) {
     msg.extendedTextMessage?.text ||
     msg.imageMessage?.caption ||
     msg.videoMessage?.caption ||
+    msg.documentMessage?.caption ||
+    msg.documentWithCaptionMessage?.message?.documentMessage?.caption ||
     ""
   );
 }
@@ -305,7 +308,33 @@ export function createMessageHandler({ waState }) {
       };
     }
 
-    if (!text && !imageInfo) return;
+    // Documents (PDF/Word/Excel/PowerPoint/txt/csv) — sent directly, with a
+    // caption (documentWithCaptionMessage), or as a swipe-reply to an earlier
+    // one. We extract the text later and answer about it.
+    let docInfo = null;
+    const directDoc =
+      m.message?.documentMessage || m.message?.documentWithCaptionMessage?.message?.documentMessage;
+    const quotedDoc =
+      ctxInfo?.quotedMessage?.documentMessage ||
+      ctxInfo?.quotedMessage?.documentWithCaptionMessage?.message?.documentMessage;
+    if (directDoc && isReadableDocument(directDoc.mimetype, directDoc.fileName)) {
+      const container = m.message?.documentWithCaptionMessage?.message
+        ? { key: m.key, message: m.message.documentWithCaptionMessage.message }
+        : m;
+      docInfo = { media: container, meta: directDoc, quoted: false };
+    } else if (quotedDoc && isReadableDocument(quotedDoc.mimetype, quotedDoc.fileName)) {
+      const qmsg = ctxInfo.quotedMessage.documentWithCaptionMessage?.message || ctxInfo.quotedMessage;
+      docInfo = {
+        media: {
+          key: { remoteJid: chatJid, id: ctxInfo.stanzaId, participant: ctxInfo.participant },
+          message: qmsg,
+        },
+        meta: quotedDoc,
+        quoted: true,
+      };
+    }
+
+    if (!text && !imageInfo && !docInfo) return;
 
     // Whitelist is the single source of truth for who may talk to the bot —
     // in DMs AND in groups. The owner is auto-added at startup (index.js).
@@ -328,7 +357,11 @@ export function createMessageHandler({ waState }) {
       sender_name: senderName,
       sender_number: senderNumber,
       is_group: isGroup ? 1 : 0,
-      text: imageInfo && !imageInfo.quoted ? `[foto]${text ? ` ${text}` : ""}` : text,
+      text: docInfo && !docInfo.quoted
+        ? `[dokumen: ${docInfo.meta.fileName || "file"}]${text ? ` ${text}` : ""}`
+        : imageInfo && !imageInfo.quoted
+          ? `[foto]${text ? ` ${text}` : ""}`
+          : text,
       is_from_me: 0,
       created_at: Date.now(),
     });
@@ -470,7 +503,7 @@ export function createMessageHandler({ waState }) {
     }
 
     const query = isGroup ? stripTrigger(text) : text;
-    if (!query && !(imageInfo && config.llmVisionModel)) return;
+    if (!query && !(imageInfo && config.llmVisionModel) && !docInfo) return;
 
     // Mode commands apply immediately, skipping the queue — a queued mute
     // could be displaced by the next message in a burst and never land.
@@ -506,7 +539,7 @@ export function createMessageHandler({ waState }) {
     // Mark as read right away; the actual reply goes through the per-chat
     // queue below (debounced, typing-aware, one generation at a time).
     sock.readMessages([m.key]).catch(() => {});
-    scheduleReply({ sock, m, chatJid, senderName, senderNumber, isGroup, explicit, query, text, imageInfo, messageId });
+    scheduleReply({ sock, m, chatJid, senderName, senderNumber, isGroup, explicit, query, text, imageInfo, docInfo, messageId });
   };
 
   // ---- Per-chat reply queue ----------------------------------------------
@@ -555,7 +588,7 @@ export function createMessageHandler({ waState }) {
   }
 
   async function generateAndSendReply(job) {
-    const { sock, m, chatJid, senderName, senderNumber, isGroup, explicit, text, imageInfo, messageId } = job;
+    const { sock, m, chatJid, senderName, senderNumber, isGroup, explicit, text, imageInfo, docInfo, messageId } = job;
     let query = job.query;
 
     // Conditions may have changed during the debounce ("john diem" arriving
@@ -617,6 +650,39 @@ export function createMessageHandler({ waState }) {
         }
         if (!query) return; // no caption and no description — nothing to answer
       }
+
+      // Documents: download, extract text, and fold it into this turn's query
+      // so the LLM answers from the actual file contents. The stored history
+      // row keeps only a compact "[dokumen: name]" label — the (possibly large)
+      // extracted text rides along only in this one request.
+      if (docInfo) {
+        const fname = docInfo.meta.fileName || "dokumen";
+        const size = Number(docInfo.meta.fileLength || 0);
+        if (size > 25 * 1024 * 1024) {
+          query = `Pengguna mengirim file "${fname}" tapi ukurannya terlalu besar (>25MB) untuk kamu baca. Beri tahu dengan sopan dan minta versi lebih kecil / ringkasannya.`;
+        } else {
+          try {
+            const buffer = await downloadMediaMessage(docInfo.media, "buffer", {});
+            const raw = await extractDocumentText(buffer as Buffer, fname, docInfo.meta.mimetype || "");
+            const label = docInfo.quoted ? "membalas dokumen" : "dokumen";
+            updateMessageText(messageId, `[${label}: ${fname}]${text ? ` ${text}` : ""}`);
+            if (raw) {
+              const { text: clipped, truncated } = clipForPrompt(raw);
+              const ask = query || `Tolong baca lalu ringkas dan jelaskan isi file "${fname}" ini.`;
+              query =
+                `Pengguna mengirim file "${fname}". Berikut teks yang berhasil diekstrak dari file itu` +
+                `${truncated ? " (dipotong karena panjang)" : ""}:\n"""\n${clipped}\n"""\n\n` +
+                `Permintaan pengguna: ${ask}\n(Jawab berdasarkan isi file di atas; jangan mengarang di luar itu.)`;
+            } else {
+              query = `Pengguna mengirim file "${fname}" tapi teksnya kosong/tidak terbaca (mungkin file berbasis gambar/scan). Beri tahu dengan sopan.`;
+            }
+          } catch (err) {
+            console.error("[handler] document parse failed:", err.message);
+            query = `Pengguna mengirim file "${fname}" (${docInfo.meta.mimetype || "tipe tak dikenal"}) tapi kamu gagal membacanya. Beri tahu dengan sopan bahwa tipe file ini belum bisa kamu baca.`;
+          }
+        }
+      }
+
       // Longer than the old 35s: a skill chain (e.g. search -> weather) can
       // legitimately take a few LLM rounds plus external API calls.
       let rawReply;
