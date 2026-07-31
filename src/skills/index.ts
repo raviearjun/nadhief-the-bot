@@ -33,8 +33,9 @@ import * as shell from "./shell.js";
 import * as webapp from "./webapp.js";
 import * as code from "./code.js";
 import * as generate from "./generate.js";
+import * as exa from "./exa.js";
 
-const MODULES: any[] = [search, calculator, weather, prayer, currency, reminders, todos, notes, summary, group, calendar, docs, drive, bioskop, whitelist, gmail, sheets, youtube, github, music, server, sticker, shell, webapp, code, generate];
+const MODULES: any[] = [search, calculator, weather, prayer, currency, reminders, todos, notes, summary, group, calendar, docs, drive, bioskop, whitelist, gmail, sheets, youtube, github, music, server, sticker, shell, webapp, code, generate, exa];
 
 export function buildSkills(ctx) {
   return MODULES.flatMap((m) => m.skills(ctx));
