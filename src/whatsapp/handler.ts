@@ -683,13 +683,19 @@ export function createMessageHandler({ waState }) {
             }
             if (content) {
               const { text: clipped, truncated } = clipForPrompt(content);
+              console.log(`[handler] document read: ${fname} chars=${content.length}${truncated ? " (clipped)" : ""} ocr=${viaOcr}`);
               const ask = query || `Tolong baca lalu ringkas dan jelaskan isi file "${fname}" ini.`;
+              // Forceful framing: earlier in some chats the bot kept refusing
+              // ("can't read PDFs, upload to Drive"); once the text is in hand it
+              // must NOT keep pattern-matching that refusal from history.
               query =
-                `Pengguna mengirim file "${fname}"${viaOcr ? " (PDF hasil scan/gambar, teks dibaca via OCR)" : ""}. ` +
-                `Berikut teks yang berhasil diekstrak dari file itu${truncated ? " (dipotong karena panjang)" : ""}:\n"""\n${clipped}\n"""\n\n` +
-                `Permintaan pengguna: ${ask}\n(Jawab berdasarkan isi file di atas; jangan mengarang di luar itu.)`;
+                `[SISTEM] File "${fname}" SUDAH berhasil kamu baca${viaOcr ? " (via OCR, PDF hasil scan/gambar)" : ""} dan teks lengkapnya ada di bawah. ` +
+                `Kamu PUNYA isinya sekarang — jawab pertanyaan pengguna berdasarkan teks ini. JANGAN menolak, JANGAN bilang kamu tidak bisa baca file/PDF, dan JANGAN menyuruh upload ke Google Drive.\n\n` +
+                `ISI FILE${truncated ? " (dipotong karena panjang)" : ""}:\n"""\n${clipped}\n"""\n\n` +
+                `Permintaan pengguna: ${ask}`;
             } else {
-              query = `Pengguna mengirim file "${fname}" tapi teksnya kosong/tidak terbaca. Beri tahu dengan sopan.`;
+              console.log(`[handler] document unreadable: ${fname} isPdf=${isPdf}`);
+              query = `Pengguna mengirim file "${fname}" tapi teksnya tidak terbaca. Beri tahu dengan sopan.`;
             }
           } catch (err) {
             console.error("[handler] document parse failed:", err.message);
