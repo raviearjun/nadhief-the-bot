@@ -44,11 +44,15 @@ async function buildAppDaytona(ctx, { files, install, start_command, port }: any
     await new Promise((r) => setTimeout(r, 4000)); // give the server a moment to bind
 
     const preview = await sandbox.getPreviewLink(p);
+    // The plain preview URL needs the sandbox auth token; pass it as a query
+    // param so the link opens directly in a browser (permanent, no expiry —
+    // unlike getSignedPreviewUrl which maxes out at 24h).
+    const url = preview.token ? `${preview.url}?DAYTONA_SANDBOX_AUTH_KEY=${preview.token}` : preview.url;
     return {
       ok: true,
-      url: preview.url,
+      url,
       sandbox_id: sandbox.id,
-      note: "App live di Daytona sandbox (terpisah dari VPS). Kirim URL-nya ke user.",
+      note: "App live di Daytona sandbox (terpisah dari VPS). Kirim URL lengkapnya (dengan token) ke user apa adanya.",
     };
   } catch (e: any) {
     if (sandbox) sandbox.delete().catch(() => {}); // clean up only on failure
