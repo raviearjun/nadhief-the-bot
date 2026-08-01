@@ -228,16 +228,16 @@ export async function ocrPdfViaFiles(buffer: Buffer, fileName = "document.pdf"):
     method: "POST",
     headers: { Authorization: `Bearer ${config.llmApiKey}` },
     body: fd,
-    signal: AbortSignal.timeout(60_000),
+    signal: AbortSignal.timeout(120_000), // multi-page PDFs are rasterised per page at upload time
   });
   if (!up.ok) throw new Error(`file upload error ${up.status}: ${(await up.text().catch(() => "")).slice(0, 200)}`);
   const file = (await up.json()) as any;
 
   try {
-    const res = await fetch(LLM_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.llmApiKey}` },
-      body: JSON.stringify({
+    // Stream the transcription: a many-page deck can take a while, and the
+    // idle-timeout keeps it alive as long as tokens flow (vs a hard 90s wall).
+    const { content } = await streamCompletion(
+      {
         model: config.llmVisionModel,
         messages: [
           {
@@ -254,14 +254,11 @@ export async function ocrPdfViaFiles(buffer: Buffer, fileName = "document.pdf"):
             ],
           },
         ],
-        max_tokens: 4000,
-      }),
-      signal: AbortSignal.timeout(90_000),
-    });
-    if (!res.ok) throw new Error(`vision OCR error ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`);
-    const data = (await res.json()) as any;
-    logLlmUsage("vision", data.usage);
-    return (data.choices?.[0]?.message?.content || "").trim();
+        max_tokens: 8000,
+      },
+      { purpose: "vision" }
+    );
+    return (content || "").trim();
   } finally {
     fetch(`${config.llmBaseUrl}/files/${file.id}`, {
       method: "DELETE",

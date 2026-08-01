@@ -662,7 +662,7 @@ export function createMessageHandler({ waState }) {
         const fname = docInfo.meta.fileName || "dokumen";
         const size = Number(docInfo.meta.fileLength || 0);
         if (size > 25 * 1024 * 1024) {
-          query = `Pengguna mengirim file "${fname}" tapi ukurannya terlalu besar (>25MB) untuk kamu baca. Beri tahu dengan sopan dan minta versi lebih kecil / ringkasannya.`;
+          docReply = `Waduh, file "${fname}" kegedean (>25MB) buat aku baca. Coba kirim versi yang lebih kecil ya. 🙏`;
         } else {
           try {
             const buffer = await downloadMediaMessage(docInfo.media, "buffer", {});
@@ -697,11 +697,11 @@ export function createMessageHandler({ waState }) {
               );
             } else {
               console.log(`[handler] document unreadable: ${fname} isPdf=${isPdf}`);
-              query = `Pengguna mengirim file "${fname}" tapi teksnya tidak terbaca. Beri tahu dengan sopan.`;
+              docReply = `Maaf, aku belum berhasil baca isi file "${fname}" — kemungkinan PDF-nya berupa gambar/scan yang berat. Coba kirim versi yang ada teks-nya, atau kirim halaman pentingnya sebagai foto biar aku baca langsung ya. 🙏`;
             }
           } catch (err) {
             console.error("[handler] document parse failed:", err.message);
-            query = `Pengguna mengirim file "${fname}" (${docInfo.meta.mimetype || "tipe tak dikenal"}) tapi kamu gagal membacanya. Beri tahu dengan sopan bahwa tipe file ini belum bisa kamu baca.`;
+            docReply = `Maaf, aku gagal baca file "${fname}". Coba kirim dalam format PDF (teks)/Word/Excel ya, atau kirim sebagai foto kalau isinya gambar. 🙏`;
           }
         }
       }
