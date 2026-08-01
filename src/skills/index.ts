@@ -35,8 +35,9 @@ import * as code from "./code.js";
 import * as generate from "./generate.js";
 import * as exa from "./exa.js";
 import * as sandbox from "./sandbox.js";
+import * as webappDaytona from "./webapp_daytona.js";
 
-const MODULES: any[] = [search, calculator, weather, prayer, currency, reminders, todos, notes, summary, group, calendar, docs, drive, bioskop, whitelist, gmail, sheets, youtube, github, music, server, sticker, shell, webapp, code, generate, exa, sandbox];
+const MODULES: any[] = [search, calculator, weather, prayer, currency, reminders, todos, notes, summary, group, calendar, docs, drive, bioskop, whitelist, gmail, sheets, youtube, github, music, server, sticker, shell, webapp, code, generate, exa, sandbox, webappDaytona];
 
 export function buildSkills(ctx) {
   return MODULES.flatMap((m) => m.skills(ctx));

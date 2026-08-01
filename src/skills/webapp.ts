@@ -20,7 +20,9 @@ export function skills(ctx) {
             "work asynchronously in an isolated workspace and the owner is messaged with a live link when it's " +
             "done — so after calling this, just tell them it's being worked on and you'll send the link when " +
             "ready. Use for 'bikinin website/app ...' and for follow-up changes ('tambahin fitur X ke app Y'). " +
-            "For a change to an existing app, pass its same project_name and set iterate=true.",
+            "For a change to an existing app, pass its same project_name and set iterate=true. " +
+            "This builds on the production VPS. If build_app_daytona (isolated Daytona sandbox) is ALSO available " +
+            "and the user hasn't said where to build, ASK FIRST: 'mau di-build di VPS atau Daytona?' before calling either.",
           parameters: {
             type: "object",
             properties: {
