@@ -404,7 +404,7 @@ export async function summarizeMessages(messages, { label = "chat" } = {}) {
 // every subsequent request's history — clip them, the gist survives.
 const MAX_HISTORY_MSG_CHARS = 800;
 
-export async function answerQuestion(history, facts = [], senderName = "", notes = [], skills = []) {
+export async function answerQuestion(history, facts = [], senderName = "", notes = [], skills = [], docContext: any = null) {
   const turns = history.map((h) => {
     const clipped =
       h.text.length > MAX_HISTORY_MSG_CHARS ? h.text.slice(0, MAX_HISTORY_MSG_CHARS) + " [...dipotong]" : h.text;
@@ -534,12 +534,19 @@ export async function answerQuestion(history, facts = [], senderName = "", notes
     "bold di mana-mana, emoji banyak), JANGAN ditiru — aturan di atas yang menang. " +
     skillsNote;
 
+  const docBlock = docContext
+    ? `\n\n--- Dokumen yang baru dikirim user (kamu SUDAH membacanya) ---\n` +
+      `File "${docContext.fileName}". Isi teksnya:\n"""\n${docContext.text}\n"""\n` +
+      `Kalau user bertanya/minta sesuatu soal "file/dokumen/pptx/pdf ini/itu" (ringkas, buat cue card, ambil poin, dll), jawab dari isi di atas. JANGAN bilang kamu tidak bisa membaca file.`
+    : "";
+
   const dynamicTail =
     `\n\n--- Konteks saat ini ---\n` +
     `Hari ini: ${new Date().toString()}\n` +
     `Lawan bicara saat ini: "${senderName}".` +
     factsBlock +
-    notesBlock;
+    notesBlock +
+    docBlock;
 
   return chatWithTools([{ role: "system", content: staticHead + dynamicTail }, ...turns], {
     purpose: "chat",

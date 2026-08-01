@@ -164,7 +164,32 @@ CREATE TABLE IF NOT EXISTS chat_settings (
   muted_until INTEGER NOT NULL DEFAULT 0,
   last_unsolicited_at INTEGER NOT NULL DEFAULT 0
 );
+
+-- Last document a user sent in a chat, with its extracted text. Lets follow-up
+-- questions ("ringkas pptx ini", "buatin cue card dari itu") in later messages
+-- still see the file's contents, since chat history only keeps a "[dokumen: x]"
+-- label. One row per chat (the latest file wins).
+CREATE TABLE IF NOT EXISTS chat_documents (
+  chat_jid TEXT PRIMARY KEY,
+  file_name TEXT,
+  text TEXT,
+  created_at INTEGER
+);
 `);
+
+export function saveChatDocument(chatJid, fileName, text) {
+  db.prepare(
+    `INSERT INTO chat_documents (chat_jid, file_name, text, created_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(chat_jid) DO UPDATE SET file_name = excluded.file_name, text = excluded.text, created_at = excluded.created_at`
+  ).run(chatJid, fileName, text, Date.now());
+}
+
+// The most recent document sent in a chat, if within maxAgeMs (default 60 min).
+export function getRecentChatDocument(chatJid, maxAgeMs = 60 * 60 * 1000): any {
+  const row: any = db.prepare(`SELECT file_name, text, created_at FROM chat_documents WHERE chat_jid = ?`).get(chatJid);
+  if (!row || Date.now() - row.created_at > maxAgeMs) return null;
+  return { fileName: row.file_name, text: row.text };
+}
 
 export function insertMessage(msg) {
   const res = db

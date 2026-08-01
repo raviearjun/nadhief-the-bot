@@ -18,6 +18,8 @@ import {
   getChatSettings,
   updateChatSettings,
   isRecentExchange,
+  saveChatDocument,
+  getRecentChatDocument,
 } from "../db.js";
 import { downloadMediaMessage } from "@whiskeysockets/baileys";
 import { summarizeMessages, answerQuestion, analyzeMessage, extractLinks, describeImage, ocrPdfViaFiles, answerAboutDocument } from "../llm.js";
@@ -258,7 +260,8 @@ async function routeCommand(query, ctx) {
   const history = getRecentHistory(chatJid, 14);
   const facts = getFacts(senderNumber);
   const notes = getNotesForChats(ctx.relevantChatJids, 12);
-  return answerQuestion(history, facts, senderName, notes, buildSkills(ctx));
+  const recentDoc = isGroup ? null : getRecentChatDocument(chatJid);
+  return answerQuestion(history, facts, senderName, notes, buildSkills(ctx), recentDoc);
 }
 
 export function createMessageHandler({ waState }) {
@@ -687,6 +690,9 @@ export function createMessageHandler({ waState }) {
             if (content) {
               const { text: clipped, truncated } = clipForPrompt(content);
               console.log(`[handler] document read: ${fname} chars=${content.length}${truncated ? " (clipped)" : ""} ocr=${viaOcr}`);
+              // Remember it so follow-up questions in later messages ("ringkas
+              // pptx ini", "buatin cue card dari itu") still see the contents.
+              saveChatDocument(chatJid, fname, clipped);
               const ask = text || `Tolong ringkas dan jelaskan isi file "${fname}" ini.`;
               // Clean, history-free answer so a chat full of past "can't read
               // files" refusals can't prime the model to refuse again.
