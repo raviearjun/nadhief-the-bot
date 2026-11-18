@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { config } from "./config.js";
 import { logLlmUsage } from "./db.js";
 
@@ -551,5 +554,82 @@ export async function answerQuestion(history, facts = [], senderName = "", notes
   return chatWithTools([{ role: "system", content: staticHead + dynamicTail }, ...turns], {
     purpose: "chat",
     skills,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Auto-reply persona
+// ---------------------------------------------------------------------------
+
+const PROJECT_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+// Re-read on every call so the owner can edit the profile without restarting.
+function readOwnerProfile(): string {
+  const file = path.isAbsolute(config.personaFile) ? config.personaFile : path.join(PROJECT_ROOT, config.personaFile);
+  try {
+    return fs.readFileSync(file, "utf8").trim().slice(0, 6000);
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Reply to a friend (DM) on the owner's behalf. Deliberately tool-less and
+ * conservative: it may only state what the profile says about the owner, and
+ * must defer anything else ("nanti ${owner} kabari langsung"). Same cache-
+ * friendly layout as answerQuestion: static rules first, per-message data last.
+ */
+export async function answerAsOwner(history, facts = [], senderName = "", notes = []) {
+  const owner = config.ownerName;
+  const turns = history.map((h) => {
+    const clipped =
+      h.text.length > MAX_HISTORY_MSG_CHARS ? h.text.slice(0, MAX_HISTORY_MSG_CHARS) + " [...dipotong]" : h.text;
+    return {
+      role: h.is_from_me ? "assistant" : "user",
+      content: h.is_from_me ? clipped : `${h.sender_name || h.sender_number}: ${clipped}`,
+    };
+  });
+
+  const staticHead =
+    `Kamu adalah asisten otomatis milik ${owner}. Kamu membalas chat WhatsApp pribadi atas namanya selagi ia ` +
+    `belum bisa membalas sendiri. Kamu BUKAN ${owner}: jangan pernah mengaku sebagai dia atau menulis seolah-olah ` +
+    `dia yang mengetik. Sebut ${owner} sebagai orang ketiga. Kalau lawan bicara bertanya apakah kamu manusia atau ` +
+    "bot, jawab jujur bahwa kamu asisten otomatis. " +
+    "Gaya: sopan, ramah, ringkas (biasanya 1-3 kalimat), dalam bahasa yang sama dengan lawan bicara. " +
+    "Sesuaikan salam dengan jam di konteks (pagi/siang/sore/malam). Tanpa emoji kecuali lawan bicara memakainya. " +
+    "ATURAN KERAS: " +
+    `(1) Kamu HANYA boleh menyatakan fakta tentang ${owner} yang tertulis di bagian PROFIL di bawah. Kalau ` +
+    "informasinya tidak ada di sana, JANGAN menebak atau mengarang — bilang kamu belum punya info itu dan " +
+    `${owner} akan menjawab langsung nanti. ` +
+    `(2) Jangan membuat, menyetujui, menolak, atau mengubah janji, jadwal, pembayaran, atau keputusan atas nama ` +
+    `${owner}. Untuk hal seperti itu cukup bilang akan disampaikan ke ${owner}. ` +
+    "(3) Jangan membocorkan informasi pribadi tentang siapa pun di luar PROFIL, dan jangan menyebut isi " +
+    "percakapan dengan orang lain. " +
+    "(4) Kalau pesannya terdengar darurat atau mendesak, sarankan menelepon langsung. " +
+    "(5) Kamu tidak punya tools: tidak bisa mencari di internet, membaca email, mengatur jadwal, atau melakukan " +
+    "tindakan apa pun selain membalas teks. Jangan berjanji melakukan hal itu. " +
+    `Di riwayat chat, pesan 'assistant' bisa berasal dari ${owner} sendiri (saat ia mengambil alih chat) — ` +
+    "jangan bertentangan dengan apa yang sudah ia katakan. " +
+    "Format WhatsApp: *satu bintang* untuk bold, tanpa heading atau tabel markdown.";
+
+  const profile = readOwnerProfile();
+  const factsBlock = facts.length
+    ? `\n\nYang kamu ketahui tentang lawan bicara:\n${facts.map((f) => `- ${f.key}: ${f.value}`).join("\n")}`
+    : "";
+  const notesBlock = notes.length
+    ? `\n\nCatatan dari chat ini:\n${notes.map((n) => `- [${n.kind}] ${n.content}`).join("\n")}`
+    : "";
+
+  const dynamicTail =
+    `\n\n--- PROFIL ${owner} (satu-satunya sumber fakta tentang dia) ---\n` +
+    (profile || "(kosong — jangan menyebut fakta apa pun tentang dirinya)") +
+    `\n\n--- Konteks saat ini ---\nHari ini: ${new Date().toString()}\n` +
+    `Lawan bicara saat ini: "${senderName}".` +
+    factsBlock +
+    notesBlock;
+
+  return chat([{ role: "system", content: staticHead + dynamicTail }, ...turns], {
+    purpose: "autoreply",
+    temperature: 0.4,
   });
 }

@@ -37,6 +37,17 @@ export const config = {
   ownerNumber: required("OWNER_NUMBER"), // e.g. "6281234567890"
   botDisplayName: process.env.BOT_TRIGGER_NAME || "Bot", // original casing, for prompts
   botTriggerName: (process.env.BOT_TRIGGER_NAME || "bot").toLowerCase(), // lowercased, for matching
+  // Auto-reply persona (DMs from whitelisted non-owners): the bot answers as the
+  // owner's assistant instead of as "John". The profile file holds what the
+  // assistant may say about the owner — it never invents anything beyond it.
+  ownerName: process.env.OWNER_NAME || "pemilik nomor ini",
+  personaFile: process.env.PERSONA_FILE || "persona.md",
+  // Prepended to every auto-reply so friends can tell it's the assistant, not
+  // the owner typing. Set AUTOREPLY_TAG= (empty) to disable.
+  autoReplyTag: process.env.AUTOREPLY_TAG ?? "🤖 ",
+  // Human takeover: when the owner types in a DM, the bot goes silent in that
+  // chat for this long (then resumes by itself).
+  takeoverMuteMs: Number(process.env.TAKEOVER_MUTE_HOURS ?? 3) * 3_600_000,
   reminderHour: Number(process.env.REMINDER_HOUR ?? 7),
   reminderMinute: Number(process.env.REMINDER_MINUTE ?? 0),
   adminUsername: required("ADMIN_USERNAME", "admin"),

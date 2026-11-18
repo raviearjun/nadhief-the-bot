@@ -2,6 +2,7 @@ import makeWASocket, {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
+  generateMessageID,
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import pino from "pino";
@@ -10,6 +11,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { rm } from "node:fs/promises";
 import { notePresenceUpdate } from "./typing.js";
+import { rememberBotMessage } from "./botsent.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const AUTH_DIR = path.join(__dirname, "..", "..", "auth_info");
@@ -53,6 +55,16 @@ export async function startWhatsApp(onMessage) {
    
     keepAliveIntervalMs: 25_000,
   });
+
+  // Single choke point for every outgoing message (handler, skills, scheduler):
+  // pick the message ID ourselves and record it before sending, so the handler
+  // can later tell the bot's own messages from the owner's manual typing.
+  const rawSend = sock.sendMessage.bind(sock);
+  (sock as any).sendMessage = (jid, content, options: any = {}) => {
+    const messageId = options.messageId ?? generateMessageID();
+    rememberBotMessage(messageId);
+    return rawSend(jid, content, { ...options, messageId });
+  };
 
   sock.ev.on("creds.update", saveCreds);
 
@@ -106,9 +118,17 @@ export async function startWhatsApp(onMessage) {
   });
 
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
-    if (type !== "notify") return;
     for (const m of messages) {
       if (!m.message) continue;
+      // Normally only live ("notify") messages are processed. The owner's own
+      // fresh manual messages are also accepted as "append" (a very recent
+      // timestamp rules out history sync); the bot's own echoes are filtered
+      // out in the handler via the recorded message IDs.
+      if (type !== "notify") {
+        const ts = Number((m.messageTimestamp as any)?.toNumber?.() ?? m.messageTimestamp ?? 0);
+        const ageSec = Date.now() / 1000 - ts;
+        if (!(m.key.fromMe && ageSec > -5 && ageSec < 30)) continue;
+      }
       try {
         await onMessage(sock, m);
       } catch (err) {

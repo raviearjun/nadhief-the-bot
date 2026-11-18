@@ -39,6 +39,12 @@ import * as webappDaytona from "./webapp_daytona.js";
 
 const MODULES: any[] = [search, calculator, weather, prayer, currency, reminders, todos, notes, summary, group, calendar, docs, drive, bioskop, whitelist, gmail, sheets, youtube, github, music, server, sticker, shell, webapp, code, generate, exa, sandbox, webappDaytona];
 
+// Skills any whitelisted friend may use: read-only public data, no access to
+// the owner's accounts or stored data. Allowlist (not denylist) on purpose —
+// a newly added skill stays owner-only until it is listed here.
+const PUBLIC_MODULES: any[] = [calculator, weather, prayer, currency, bioskop];
+
 export function buildSkills(ctx) {
-  return MODULES.flatMap((m) => m.skills(ctx));
+  const modules = ctx.isOwner ? MODULES : PUBLIC_MODULES;
+  return modules.flatMap((m) => m.skills(ctx));
 }

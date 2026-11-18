@@ -22,12 +22,13 @@ import {
   getRecentChatDocument,
 } from "../db.js";
 import { downloadMediaMessage } from "@whiskeysockets/baileys";
-import { summarizeMessages, answerQuestion, analyzeMessage, extractLinks, describeImage, ocrPdfViaFiles, answerAboutDocument } from "../llm.js";
+import { summarizeMessages, answerQuestion, answerAsOwner, analyzeMessage, extractLinks, describeImage, ocrPdfViaFiles, answerAboutDocument } from "../llm.js";
 import { isReadableDocument, extractDocumentText, clipForPrompt } from "../document.js";
 import { buildSkills } from "../skills/index.js";
 import { isGoogleConnected } from "../google.js";
 import { getSocket } from "./connection.js";
 import { isSomeoneTyping } from "./typing.js";
+import { isBotMessage } from "./botsent.js";
 import {
   getPendingCommand,
   clearPendingCommand,
@@ -73,6 +74,24 @@ async function sendWithRetry(chatJid, text, quoted) {
       await new Promise((r) => setTimeout(r, 3_000));
     }
   }
+}
+
+// ---- DM mute (human takeover) ----------------------------------------------
+// Keyed by the friend's phone number, NOT the chat JID: WhatsApp may address
+// the same DM as <number>@s.whatsapp.net or <id>@lid depending on direction.
+// Stored in chat_settings under a synthetic "dm:<number>" key.
+const OFF_UNTIL_ON_MS = 10 * 365 * DAY_MS; // "/john off": effectively until "/john on"
+const OWN_CONTENT_TYPES = [
+  "conversation", "extendedTextMessage", "imageMessage", "videoMessage", "audioMessage",
+  "documentMessage", "documentWithCaptionMessage", "stickerMessage", "contactMessage", "locationMessage",
+];
+
+function dmKey(number) {
+  return `dm:${normalizeNumber(number)}`;
+}
+
+function isDmMuted(number) {
+  return getChatSettings(dmKey(number)).muted_until > Date.now();
 }
 
 function parseDurationSpec(spec) {
@@ -207,6 +226,14 @@ async function routeCommand(query, ctx) {
   const { chatJid, senderName, senderNumber, isGroup } = ctx;
   const lower = query.toLowerCase();
 
+  // A friend (whitelisted non-owner) in a DM is answered as the owner's
+  // assistant — tool-less, profile-bound, and before any slash command so
+  // /notes, /summary etc. can't be used to read the owner's data.
+  if (!isGroup && !ctx.isOwner) {
+    const history = getRecentHistory(chatJid, 14);
+    return answerAsOwner(history, getFacts(senderNumber), senderName, getNotesForChats([chatJid], 8));
+  }
+
   // Fast-path slash commands stay regex-based for reliability; everything
   // else goes to the LLM, which picks the right skill(s) itself.
   const remindMatch = query.match(REMINDER_CMD_RE);
@@ -270,8 +297,87 @@ export function createMessageHandler({ waState }) {
   const replyQueues = new Map();
   const presenceSubscribed = new Set();
 
+  // friend's number -> the chatJid their DMs arrive under (so the owner's manual
+  // messages land in the same history the LLM reads).
+  const dmChatByNumber = new Map();
+
+  // Human takeover: a fromMe message the bot did not send was typed by the owner.
+  // Mute that DM for config.takeoverMuteMs, drop any reply already queued, and
+  // record what the owner said so the LLM knows when it resumes.
+  // "/john on" / "/john off" typed in the chat control the mute explicitly.
+  async function handleOwnMessage(sock, m) {
+    const jid = m.key.remoteJid;
+    if (!jid || !/@(s\.whatsapp\.net|lid)$/.test(jid)) return; // DMs only
+    if (isBotMessage(m.key.id)) return; // the bot's own echo
+    const content = m.message ?? {};
+    if (!OWN_CONTENT_TYPES.some((t) => content[t])) return; // reactions, revokes, etc.
+
+    const ownIds = [waState.ownJid, waState.ownLid].filter(Boolean).map(bareNumber);
+    if (ownIds.includes(bareNumber(jid))) return; // note-to-self chat
+
+    let number = bareNumber(jid);
+    if (jid.endsWith("@lid")) {
+      const alt = (m.key as any).remoteJidAlt;
+      number = getNumberForLid(number) ?? (alt ? bareNumber(alt) : null);
+    }
+    if (!number) {
+      console.warn(`[takeover] cannot resolve a phone number for ${jid} — not muting`);
+      return;
+    }
+
+    const text = getMessageText(m).trim();
+    const cmd = text.match(/^\/john\s+(on|off)$/i);
+    const notifyOwner = (msg) => {
+      if (!waState.ownJid) return;
+      sock.sendMessage(`${bareNumber(waState.ownJid)}@s.whatsapp.net`, { text: msg }).catch(() => {});
+    };
+
+    if (cmd) {
+      const on = cmd[1].toLowerCase() === "on";
+      updateChatSettings(dmKey(number), { muted_until: on ? 0 : Date.now() + OFF_UNTIL_ON_MS });
+      console.log(`[takeover] /john ${on ? "on" : "off"} for ${number}`);
+      // Remove the command from the friend's view (best-effort), confirm privately.
+      sock.sendMessage(jid, { delete: m.key }).catch(() => {});
+      notifyOwner(
+        on
+          ? `✅ John aktif lagi di chat ${number}.`
+          : `🔕 John dimatikan di chat ${number} sampai kamu ketik /john on di sana.`
+      );
+      return;
+    }
+
+    const wasMuted = isDmMuted(number);
+    // Don't shorten an explicit "/john off" with a 3h takeover window.
+    const until = Math.max(getChatSettings(dmKey(number)).muted_until, Date.now() + config.takeoverMuteMs);
+    updateChatSettings(dmKey(number), { muted_until: until });
+
+    const normalized = normalizeNumber(number);
+    for (const q of replyQueues.values()) {
+      if (q.job && normalizeNumber(q.job.senderNumber) === normalized) q.job = null;
+    }
+
+    const histJid = dmChatByNumber.get(normalized) ?? jid;
+    insertMessage({
+      chat_jid: histJid,
+      chat_name: number,
+      sender_jid: waState.ownJid || "owner",
+      sender_name: config.ownerName,
+      sender_number: null,
+      is_group: 0,
+      text: text || "[media]",
+      is_from_me: 1,
+      created_at: Date.now(),
+    });
+    if (!wasMuted) {
+      console.log(`[takeover] owner typed in DM with ${number} — bot muted for ${config.takeoverMuteMs / 3_600_000}h`);
+    }
+  }
+
   return async function onMessage(sock, m) {
-    if (m.key.fromMe) return;
+    if (m.key.fromMe) {
+      await handleOwnMessage(sock, m);
+      return;
+    }
 
     const chatJid = m.key.remoteJid;
     if (!chatJid || chatJid === "status@broadcast") return;
@@ -352,6 +458,7 @@ export function createMessageHandler({ waState }) {
     if (!isGroup && !whitelisted) return;
 
     if (whitelisted) upsertContact(senderNumber, senderName);
+    if (whitelisted && !isGroup) dmChatByNumber.set(normalizeNumber(senderNumber), chatJid);
 
     const messageId = insertMessage({
       chat_jid: chatJid,
@@ -388,7 +495,9 @@ export function createMessageHandler({ waState }) {
     const explicit = isGroup && (isMentioned(m, waState) || isReplyToBot(m, waState));
     const ambientAllowed = isGroup && !ignored && settings.proactive === 1 && settings.muted_until < Date.now();
     const triggered = explicit || (ambientAllowed && isRecentExchange(chatJid, senderNumber));
-    let shouldReply = whitelisted && !ignored && (isGroup ? triggered : true);
+    const dmMuted = !isGroup && whitelisted && isDmMuted(senderNumber);
+    if (dmMuted) console.log(`[handler] DM with ${senderNumber} is muted (owner took over) — not replying`);
+    let shouldReply = whitelisted && !ignored && (isGroup ? triggered : !dmMuted);
     let proactive = false;
 
     if (whitelisted) {
@@ -594,6 +703,9 @@ export function createMessageHandler({ waState }) {
     const { sock, m, chatJid, senderName, senderNumber, isGroup, explicit, text, imageInfo, docInfo, messageId } = job;
     let query = job.query;
 
+    // The owner may have taken over while this job waited in the queue.
+    if (!isGroup && isDmMuted(senderNumber)) return;
+
     // Conditions may have changed during the debounce ("john diem" arriving
     // right behind the message we were about to answer) — re-check before
     // speaking unless the message addressed John explicitly.
@@ -661,7 +773,9 @@ export function createMessageHandler({ waState }) {
       // with the text in hand. The stored history row keeps only a compact
       // "[dokumen: name]" label.
       let docReply;
-      if (docInfo) {
+      if (docInfo && !isGroup && !ctx.isOwner) {
+        docReply = `Terima kasih, filenya sudah diterima. ${config.ownerName} akan melihatnya langsung nanti.`;
+      } else if (docInfo) {
         const fname = docInfo.meta.fileName || "dokumen";
         const size = Number(docInfo.meta.fileLength || 0);
         if (size > 25 * 1024 * 1024) {
@@ -731,8 +845,17 @@ export function createMessageHandler({ waState }) {
         await new Promise((r) => setTimeout(r, 10_000));
         rawReply = await withTimeout(routeCommand(query, ctx), 75_000, "routeCommand retry");
       }
+      // The owner may have started typing during the (slow) LLM call.
+      if (!isGroup && isDmMuted(senderNumber)) {
+        console.log(`[handler] owner took over DM with ${senderNumber} during generation — dropping reply`);
+        return;
+      }
       if (rawReply) {
-        const reply = toWhatsAppFormat(rawReply);
+        let reply = toWhatsAppFormat(rawReply);
+        // Friends should be able to tell this is the assistant, not the owner typing.
+        if (!isGroup && !ctx.isOwner && config.autoReplyTag && !reply.startsWith(config.autoReplyTag)) {
+          reply = config.autoReplyTag + reply;
+        }
         // Two attempts: if the first send hits a just-died socket, the
         // reconnect (see connection.js) usually completes within seconds —
         // resolve the socket again and retry instead of dropping the reply.

@@ -3,3 +3,4 @@ auth_info/
 data.sqlite
 data.sqlite-*
 .env
+persona.md
